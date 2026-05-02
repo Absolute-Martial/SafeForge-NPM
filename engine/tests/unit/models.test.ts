@@ -125,6 +125,10 @@ test("AuditReport defaults nullable and array fields", () => {
   assert.deepEqual(report.proofs, []);
   assert.equal(report.triage, null);
   assert.deepEqual(report.findings, []);
+  assert.deepEqual(report.prioritizedEntrypoints, []);
+  assert.deepEqual(report.reasoningStageSummaries, []);
+  assert.deepEqual(report.familyAnalyses, []);
+  assert.deepEqual(report.evidenceGraph.nodes, []);
   assert.deepEqual(report.trace, []);
 });
 
@@ -157,8 +161,70 @@ test("AuditReport accepts a populated report tree", () => {
         problem: "Reads secrets",
         evidence: "Observed env access",
         reproductionStrategy: "require the package",
+        proofType: "observed",
+        entrypointId: "main:index",
+        sinkKind: "env_access",
+        evidenceNodeIds: ["n1"],
       },
     ],
+    prioritizedEntrypoints: [
+      {
+        id: "main:index",
+        type: "main",
+        label: "index.js",
+        file: "index.js",
+        trigger: "",
+        reason: "primary entrypoint",
+        priority: 8,
+        scriptName: null,
+        commandName: null,
+      },
+    ],
+    reasoningStageSummaries: [
+      {
+        stage: "threat_context",
+        summary: "Package intent mismatches secret access.",
+        highlights: ["Claims harmless behavior", "Reads env vars immediately"],
+      },
+    ],
+    familyAnalyses: [
+      {
+        family: "credential_theft",
+        selected: true,
+        rationale: "Reads secrets at startup",
+        summary: "Strong secret-harvesting indicators.",
+        entrypointIds: ["main:index"],
+        sinkKinds: ["env_access", "network"],
+        observedSignals: ["process.env read"],
+      },
+    ],
+    evidenceGraph: {
+      entrypoints: [
+        {
+          id: "main:index",
+          type: "main",
+          label: "index.js",
+          file: "index.js",
+          trigger: "",
+          reason: "primary entrypoint",
+          priority: 8,
+          scriptName: null,
+          commandName: null,
+        },
+      ],
+      nodes: [
+        {
+          id: "n1",
+          kind: "sink",
+          label: "process.env",
+          fileLine: "index.js:1-5",
+          detail: "Reads secrets",
+          entrypointId: "main:index",
+          sinkKind: "env_access",
+        },
+      ],
+      edges: [],
+    },
     trace: [
       {
         phase: "triage",
@@ -174,6 +240,8 @@ test("AuditReport accepts a populated report tree", () => {
   assert.deepEqual(report.capabilities, ["ENV_VARS", "NETWORK"]);
   assert.equal(report.proofs.length, 1);
   assert.equal(report.findings[0]?.confidence, "CONFIRMED");
+  assert.equal(report.reasoningStageSummaries[0]?.stage, "threat_context");
+  assert.equal(report.evidenceGraph.nodes[0]?.sinkKind, "env_access");
   assert.equal(report.trace[0]?.phase, "triage");
 });
 

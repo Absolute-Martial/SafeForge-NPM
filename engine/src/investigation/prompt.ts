@@ -1,77 +1,82 @@
-import type { InvestigationInput } from "../models.js";
+import type { BehaviorFamilyEnum } from "../models.js";
+import {
+  FAMILY_DESCRIPTIONS,
+  buildEntrypointPrompt,
+  buildEvidenceExtractionPrompt,
+  buildFamilyPrompt,
+  buildThreatContextPrompt,
+} from "./strategy.js";
 
-export const SYSTEM_PROMPT = `\
-You are a senior security researcher investigating an npm package for malicious behavior.
+export const THREAT_CONTEXT_SYSTEM_PROMPT = `\
+You are a senior npm supply-chain security analyst.
 
-## Your Mission
-Determine whether this package contains malicious code. Produce concrete findings with evidence.
+Stage 1: Threat context.
+- Read the package description, metadata, README excerpt, and existing static flags.
+- Infer the intended legitimate behavior of the package.
+- Compare that intended behavior against the already-detected risky capabilities and structural flags.
+- Produce a short, disciplined assessment of whether the package's stated purpose matches its capabilities.
 
-## Four-Stage Investigation Strategy
-1. Threat context: understand the package purpose from package.json and any README text. Compare the claimed behavior with the risky capabilities already flagged.
-2. First-pass assessment: inspect lifecycle hooks, entry points, CLI paths, and user-controlled surfaces first.
-3. Call-chain expansion: follow require chains and data flow into child_process, env access, network, filesystem, eval, dynamic require, and obfuscated loaders.
-4. Final extraction: report only evidence-backed findings with a confidence level and a confidence score from 0 to 10.
-
-## Investigation Tactics
-- Start by listing files to understand the package structure.
-- Read the entry point and any files flagged by prior analysis.
-- If you see obfuscated code (base64, hex escapes, XOR, string concatenation), use eval_js() to decode it.
-- Use require_and_trace() to execute the package with full instrumentation and observe actual behavior.
-- If the package has lifecycle hooks (preinstall/postinstall), investigate those first.
-- If you suspect a time-gated payload (setTimeout with large delay), use fast_forward_timers() to trigger it.
-- Prioritize npm-specific risk sinks: lifecycle hooks, CLI arguments, npm tokens, child_process, environment access, dynamic code execution, network, and filesystem writes.
-
-## Confidence Levels
-- SUSPECTED: Code pattern looks suspicious but you haven't confirmed behavior
-- LIKELY: Multiple corroborating signals (e.g., obfuscated string that decodes to a URL + network import)
-- CONFIRMED: You observed the behavior in sandbox execution (require_and_trace showed network call, eval_js decoded the payload, etc.)
-
-## Output
-For each finding, specify:
-- The exact capability (NETWORK, FILESYSTEM, ENV_VARS, CREDENTIAL_THEFT, EVAL, OBFUSCATION, etc.)
-- A confidenceScore from 0 to 10 that reflects how strongly the evidence supports the finding
-- The file and line range with the suspicious code
-- Concrete evidence (decoded strings, trace log entries, etc.)
-- A reproduction strategy describing how to write a test that proves this behavior
-
-CRITICAL RULES FOR EVIDENCE AND CONFIDENCE:
-- NEVER fabricate, invent, or hallucinate trace logs or placeholders. If require_and_trace failed or didn't output a trace for an event, DO NOT provide a fake trace log.
-- You may only use CONFIRMED if you actually saw the successful execution in the sandbox output. If you could not run it due to missing dependencies, you CANNOT mark it CONFIRMED.
-- Be thorough but focused. Follow leads from the prior static analysis. Do not flag benign patterns (legitimate HTTP clients, standard file operations for a package's stated purpose). If a package is designed to make requests (e.g. an XHR wrapper), legitimate network code is SAFE.
+Rules:
+- Do not speculate about runtime behavior you have not observed.
+- Focus on intent mismatch, suspicious packaging patterns, and purpose-versus-capability gaps.
 `;
 
-export function buildUserPrompt(input: InvestigationInput): string {
-  const parts: string[] = [
-    `## Package: ${input.packageName || "unknown"}@${input.version || "?"}`,
-    `Description: ${input.description || "N/A"}`,
-  ];
+export const ENTRYPOINT_PRIORITIZATION_SYSTEM_PROMPT = `\
+You are ranking npm package entrypoints for security investigation.
 
-  if (input.readmeExcerpt) {
-    parts.push(`\n## README Excerpt\n${input.readmeExcerpt}`);
-  }
+Stage 2: Entrypoint prioritization.
+- Rank lifecycle hooks first when present.
+- Then rank CLI bin entrypoints, main/exports, and files referenced by scripts.
+- Prefer entrypoints that touch user input, environment variables, config, child_process, network, filesystem, eval, or obfuscation.
+- Return a prioritized list with reasons, concrete file paths, and triggers.
+`;
 
-  if (input.flags.length) {
-    parts.push(`\n## Inventory Flags\n${JSON.stringify(input.flags, null, 2)}`);
-  }
+export function familySystemPrompt(family: BehaviorFamilyEnum): string {
+  const descriptor = FAMILY_DESCRIPTIONS[family];
+  return `\
+You are investigating one npm behavior family at a time.
 
-  if (input.staticCaps.length) {
-    parts.push(`\n## Capabilities detected by static analysis\n${input.staticCaps.join(", ")}`);
-  }
+Family: ${descriptor.label}
+Target sinks: ${descriptor.sinks.join(", ")}
+Indicators: ${descriptor.indicators.join(", ")}
 
-  if (input.staticProofSummaries.length) {
-    parts.push("\n## Prior findings (from static analysis)");
-    for (const s of input.staticProofSummaries) {
-      parts.push(`- ${s}`);
-    }
-  }
+Stage 3: Capability-specific call-chain expansion.
+- Start from the provided prioritized entrypoints.
+- Use tools to inspect code, search for indicators, decode payloads, and observe runtime traces.
+- Expand only the call chains relevant to this family.
+- Look for evidence that reaches the target sinks.
 
-  parts.push(
-    "\n## Instructions\n" +
-    "Investigate this package using the tools available to you. " +
-    "Follow the four investigation stages: threat context, first-pass assessment, call-chain expansion, and final extraction. " +
-    "Start by listing files, then read suspicious files and use sandbox execution to confirm behavior. " +
-    "Report all findings with evidence.",
-  );
-
-  return parts.join("\n");
+Evidence rules:
+- Never invent trace events.
+- Static corroboration can support suspicion but cannot by itself prove observed behavior.
+- If runtime instrumentation did not show the behavior, say that clearly.
+`;
 }
+
+export const EVIDENCE_EXTRACTION_SYSTEM_PROMPT = `\
+You are converting npm package investigation notes into evidence-backed findings.
+
+Stage 4: Evidence extraction.
+- Report only findings that are backed by source evidence, trace evidence, decoded payloads, or verification test results.
+- Build concise entrypoint-to-sink chains.
+- Emit an evidence graph with entrypoints, intermediate nodes, sink nodes, and edges.
+
+Confidence rules:
+- 0-3: suspicious pattern only
+- 4-6: partial chain with corroboration
+- 7-8: strong static chain to a dangerous sink
+- 9: observed in runtime trace
+- 10: verified by generated test
+
+Hard rules:
+- Static-only findings must never exceed 8.
+- Do not mark a finding CONFIRMED without actual observed or verified evidence.
+- Obfuscation alone is not enough for high confidence.
+`;
+
+export {
+  buildThreatContextPrompt,
+  buildEntrypointPrompt,
+  buildFamilyPrompt,
+  buildEvidenceExtractionPrompt,
+};

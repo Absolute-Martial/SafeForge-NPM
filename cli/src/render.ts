@@ -93,6 +93,14 @@ export function describeEvent(event: AuditEventEnvelope, _plain: boolean): strin
       const label = finding?.confidence === "CONFIRMED" ? "CONFIRMED" : finding?.confidence === "LIKELY" ? "LIKELY" : "SUSPICIOUS";
       return `> ${label}: ${finding?.problem ?? "suspicious behavior identified"}`;
     }
+    case "investigation_stage_started": {
+      const family = event.family ? ` (${String(event.family).replace(/_/g, " ")})` : "";
+      return `> investigation ${String(event.stage ?? "").replace(/_/g, " ")}${family}...`;
+    }
+    case "investigation_stage_completed": {
+      const family = event.family ? `${String(event.family).replace(/_/g, " ")}: ` : "";
+      return `> ${family}${String(event.summary ?? "investigation stage complete")}`;
+    }
     case "cli_behavior_started": {
       const nodeVersions = (event.nodeVersions as string[] | undefined) ?? [];
       const commands = (event.commands as Array<{ name?: string }> | undefined) ?? [];

@@ -339,6 +339,10 @@ export function ResultsPanel({
   const advisories = useAuditStore((s) => s.advisories);
   const advisorySummary = useAuditStore((s) => s.advisorySummary);
   const scanWarnings = useAuditStore((s) => s.scanWarnings);
+  const prioritizedEntrypoints = useAuditStore((s) => s.prioritizedEntrypoints);
+  const reasoningStageSummaries = useAuditStore((s) => s.reasoningStageSummaries);
+  const familyAnalyses = useAuditStore((s) => s.familyAnalyses);
+  const evidenceGraph = useAuditStore((s) => s.evidenceGraph);
   const verdict = useAuditStore((s) => s.verdict);
   const finalScore = useAuditStore((s) => s.finalScore);
   const recommendedAction = useAuditStore((s) => s.recommendedAction);
@@ -535,6 +539,134 @@ export function ResultsPanel({
                 {advisories.map((advisory) => (
                   <AdvisoryCard key={`${advisory.id}-${advisory.packageName}-${advisory.packageVersion}`} advisory={advisory} />
                 ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {(prioritizedEntrypoints.length > 0 || reasoningStageSummaries.length > 0 || familyAnalyses.length > 0 || (evidenceGraph && evidenceGraph.nodes.length > 0)) && (
+          <div style={{ borderTop: "1px solid var(--border)", padding: "16px 20px 20px" }}>
+            <span className="section-header" style={{ padding: 0 }}>Evidence</span>
+
+            {reasoningStageSummaries.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 10 }}>
+                {reasoningStageSummaries.map((stage) => (
+                  <div
+                    key={stage.stage}
+                    style={{
+                      border: "1px solid var(--border)",
+                      borderRadius: "var(--radius-sm)",
+                      padding: "10px 12px",
+                      background: "var(--bg-primary)",
+                    }}
+                  >
+                    <div style={{ fontFamily: "var(--font-mono)", fontSize: "0.62rem", color: "var(--text-muted)", marginBottom: 6 }}>
+                      {stage.stage.replace(/_/g, " ")}
+                    </div>
+                    <div style={{ fontSize: "0.78rem", color: "var(--text)", lineHeight: 1.6 }}>{stage.summary}</div>
+                    {stage.highlights.length > 0 && (
+                      <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+                        {stage.highlights.slice(0, 4).map((highlight) => (
+                          <div key={highlight} style={{ fontSize: "0.72rem", color: "var(--text-dim)", lineHeight: 1.5 }}>
+                            {highlight}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {prioritizedEntrypoints.length > 0 && (
+              <div style={{ marginTop: 16 }}>
+                <div style={{ fontSize: "0.68rem", color: "var(--text-muted)", fontFamily: "var(--font-mono)", marginBottom: 8 }}>
+                  PRIORITIZED ENTRYPOINTS
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {prioritizedEntrypoints.slice(0, 6).map((entrypoint) => (
+                    <div key={entrypoint.id} style={{ borderLeft: "2px solid var(--accent)", paddingLeft: 10 }}>
+                      <div style={{ fontSize: "0.76rem", color: "var(--text)" }}>
+                        {entrypoint.type} · {entrypoint.label}
+                      </div>
+                      <div style={{ fontFamily: "var(--font-mono)", fontSize: "0.68rem", color: "var(--accent-light)", marginTop: 4 }}>
+                        {entrypoint.file || entrypoint.trigger || "n/a"}
+                      </div>
+                      <div style={{ fontSize: "0.72rem", color: "var(--text-dim)", marginTop: 4, lineHeight: 1.5 }}>
+                        {entrypoint.reason}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {familyAnalyses.length > 0 && (
+              <div style={{ marginTop: 16 }}>
+                <div style={{ fontSize: "0.68rem", color: "var(--text-muted)", fontFamily: "var(--font-mono)", marginBottom: 8 }}>
+                  BEHAVIOR FAMILIES
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {familyAnalyses.map((family) => (
+                    <div key={family.family} style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "10px 12px", background: "var(--bg-primary)" }}>
+                      <div style={{ fontSize: "0.74rem", color: "var(--text)" }}>{family.family.replace(/_/g, " ")}</div>
+                      <div style={{ fontSize: "0.72rem", color: "var(--text-dim)", marginTop: 4, lineHeight: 1.5 }}>{family.summary}</div>
+                      {(family.sinkKinds.length > 0 || family.observedSignals.length > 0) && (
+                        <div style={{ marginTop: 8, fontSize: "0.68rem", color: "var(--text-muted)", lineHeight: 1.6 }}>
+                          {family.sinkKinds.length > 0 ? `sinks: ${family.sinkKinds.join(", ")}` : ""}
+                          {family.sinkKinds.length > 0 && family.observedSignals.length > 0 ? " · " : ""}
+                          {family.observedSignals.length > 0 ? `signals: ${family.observedSignals.join(", ")}` : ""}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {evidenceGraph && evidenceGraph.nodes.length > 0 && (
+              <div style={{ marginTop: 16 }}>
+                <div style={{ fontSize: "0.68rem", color: "var(--text-muted)", fontFamily: "var(--font-mono)", marginBottom: 8 }}>
+                  EVIDENCE CHAINS
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {evidenceGraph.entrypoints.slice(0, 6).map((entrypoint) => {
+                    const nodes = evidenceGraph.nodes.filter((node) => node.entrypointId === entrypoint.id);
+                    return (
+                      <div key={entrypoint.id} style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "10px 12px", background: "var(--bg-primary)" }}>
+                        <div style={{ fontSize: "0.76rem", color: "var(--text)" }}>
+                          {entrypoint.label}
+                        </div>
+                        <div style={{ fontFamily: "var(--font-mono)", fontSize: "0.68rem", color: "var(--text-muted)", marginTop: 4 }}>
+                          {entrypoint.file || entrypoint.trigger || "n/a"}
+                        </div>
+                        {nodes.length > 0 ? (
+                          <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                            {nodes.slice(0, 4).map((node) => (
+                              <div key={node.id} style={{ borderLeft: "2px solid var(--border)", paddingLeft: 10 }}>
+                                <div style={{ fontSize: "0.72rem", color: "var(--text)" }}>
+                                  {node.kind} {node.sinkKind ? `· ${node.sinkKind}` : ""}
+                                </div>
+                                <div style={{ fontSize: "0.7rem", color: "var(--text-dim)", lineHeight: 1.5, marginTop: 2 }}>
+                                  {node.detail || node.label}
+                                </div>
+                                {node.fileLine && (
+                                  <div style={{ fontFamily: "var(--font-mono)", fontSize: "0.66rem", color: "var(--accent-light)", marginTop: 4 }}>
+                                    {node.fileLine}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div style={{ marginTop: 8, fontSize: "0.72rem", color: "var(--text-muted)" }}>
+                            No evidence nodes attached.
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
           </div>

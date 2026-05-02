@@ -438,7 +438,7 @@ export async function verifyProofs(
         }
       }
       return proofs.map((proof) =>
-        proof.testFile ? { ...proof, kind: "TEST_UNCONFIRMED" as const, verifyError: "container_start_failed" } : proof,
+        proof.testFile ? { ...proof, kind: "TEST_UNCONFIRMED" as const, verifyError: "container_start_failed", proofType: proof.proofType === "verified" ? "observed" as const : proof.proofType } : proof,
       );
     }
     console.log(`[verify] container started`);
@@ -472,7 +472,7 @@ export async function verifyProofs(
             }
           }
           return proofs.map((proof) =>
-            proof.testFile ? { ...proof, kind: "TEST_UNCONFIRMED" as const, verifyError: "npm_install_failed" } : proof,
+            proof.testFile ? { ...proof, kind: "TEST_UNCONFIRMED" as const, verifyError: "npm_install_failed", proofType: proof.proofType === "verified" ? "observed" as const : proof.proofType } : proof,
           );
         }
       }
@@ -501,7 +501,7 @@ export async function verifyProofs(
             }
             return currentProofs.map((proof) =>
               proof.testFile && proof.kind !== "TEST_CONFIRMED"
-                ? { ...proof, kind: "TEST_UNCONFIRMED" as const, verifyError: "results_parse_failed" }
+                ? { ...proof, kind: "TEST_UNCONFIRMED" as const, verifyError: "results_parse_failed", proofType: proof.proofType === "verified" ? "observed" as const : proof.proofType }
                 : proof,
             );
           }
@@ -527,8 +527,10 @@ export async function verifyProofs(
             return {
               ...proof,
               kind: "TEST_CONFIRMED" as const,
+              proofType: "verified" as const,
               reproducible: true,
               confidence: "CONFIRMED" as const,
+              confidenceScore: 10,
             };
           }
 
@@ -556,7 +558,7 @@ export async function verifyProofs(
           currentProofs = currentProofs.map((proof, i) => {
             if (proof.testFile && proof.kind !== "TEST_CONFIRMED") {
               emit?.("verify_test_result", { proofIndex: i, testFile: `finding-${i}.test.ts`, status: "unconfirmed" });
-              return { ...proof, kind: "TEST_UNCONFIRMED" as const };
+              return { ...proof, kind: "TEST_UNCONFIRMED" as const, proofType: proof.proofType === "verified" ? "observed" as const : proof.proofType };
             }
             return proof;
           });
@@ -569,7 +571,7 @@ export async function verifyProofs(
           currentProofs = currentProofs.map((proof, i) => {
             if (proof.testFile && proof.kind !== "TEST_CONFIRMED") {
               emit?.("verify_test_result", { proofIndex: i, testFile: `finding-${i}.test.ts`, status: "unconfirmed" });
-              return { ...proof, kind: "TEST_UNCONFIRMED" as const };
+              return { ...proof, kind: "TEST_UNCONFIRMED" as const, proofType: proof.proofType === "verified" ? "observed" as const : proof.proofType };
             }
             return proof;
           });

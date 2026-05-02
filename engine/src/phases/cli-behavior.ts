@@ -235,6 +235,16 @@ function buildCliFinding(
     problem,
     evidence: observation.detail,
     reproductionStrategy: `Run ${reproductionCmd} in a Node ${command.nodeVersion} sandbox with instrumentation enabled and inspect the emitted runtime trace.`,
+    entrypointId: `cli:${command.command}`,
+    sinkKind:
+      observation.kind === "network" ? (capability === "DNS_EXFIL" ? "dns" : "network") :
+      observation.kind === "env" ? "env_access" :
+      observation.kind === "process" ? "child_process" :
+      observation.kind === "filesystem" ? "filesystem" :
+      observation.kind === "eval" ? "eval" :
+      "unknown",
+    proofType: "observed",
+    evidenceNodeIds: [],
   };
 
   const proof: Proof = {
@@ -245,6 +255,16 @@ function buildCliFinding(
     fileLine,
     problem,
     evidence: observation.detail,
+    entrypointId: `cli:${command.command}`,
+    sinkKind:
+      observation.kind === "network" ? (capability === "DNS_EXFIL" ? "dns" : "network") :
+      observation.kind === "env" ? "env_access" :
+      observation.kind === "process" ? "child_process" :
+      observation.kind === "filesystem" ? "filesystem" :
+      observation.kind === "eval" ? "eval" :
+      "unknown",
+    proofType: "observed",
+    evidenceNodeIds: [],
     kind: "AI_DYNAMIC",
     contentHash: null,
     reproducible: true,

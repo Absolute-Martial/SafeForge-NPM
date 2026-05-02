@@ -2,10 +2,10 @@ import type { AuditLlmOverride } from "../audit-options.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { config } from "../config.js";
-import { CapabilityEnum, type FileVerdict, type Finding, type InvestigationInput, type InventoryReport, type Proof, type ToolCallRecord, type TriageResult } from "../models.js";
+import { CapabilityEnum, type FamilyAnalysis, type FileVerdict, type Finding, type InvestigationInput, type InventoryReport, type PrioritizedEntrypoint, type Proof, type ReasoningStageSummary, type ToolCallRecord, type TriageResult, type EvidenceGraph } from "../models.js";
 import { DockerSandboxController } from "../sandbox/controller.js";
 import { runInvestigationAgent } from "../investigation/agent.js";
-import { LIFECYCLE_SCRIPTS } from "../inventory/parse-manifest.js";
+import { LIFECYCLE_SCRIPTS, extractScriptFileRef } from "../inventory/parse-manifest.js";
 import type { EmitFn } from "../events.js";
 import type { AuditLogger } from "../audit-log.js";
 
@@ -13,6 +13,10 @@ export interface InvestigationResult {
   capabilities: CapabilityEnum[];
   proofs: Proof[];
   findings: Finding[];
+  stageSummaries: ReasoningStageSummary[];
+  prioritizedEntrypoints: PrioritizedEntrypoint[];
+  familyAnalyses: FamilyAnalysis[];
+  evidenceGraph: EvidenceGraph;
   toolCalls: ToolCallRecord[];
   agentText: string;
 }
@@ -48,7 +52,17 @@ export async function investigate(
 ): Promise<InvestigationResult> {
   if (!config.investigationEnabled) {
     console.log("[investigate] skipped — investigation disabled");
-    return { capabilities: [], proofs: [], findings: [], toolCalls: [], agentText: "" };
+    return {
+      capabilities: [],
+      proofs: [],
+      findings: [],
+      stageSummaries: [],
+      prioritizedEntrypoints: [],
+      familyAnalyses: [],
+      evidenceGraph: { entrypoints: [], nodes: [], edges: [] },
+      toolCalls: [],
+      agentText: "",
+    };
   }
 
   // Build investigation input
@@ -63,6 +77,18 @@ export async function investigate(
     for (const cap of fv.capabilities) allCaps.add(cap);
   }
 
+  const cliCommands = inventory.entryPoints.bin.map((entry, index) => ({
+    name: path.basename(entry).replace(/\.[cm]?js$/, "") || `bin-${index + 1}`,
+    entry,
+  }));
+
+  const exportEntrypoints = [...new Set(inventory.entryPoints.runtime.filter((entry) => entry !== "index.js"))];
+  const scriptReferencedFiles = [...new Set(
+    Object.values(inventory.scripts)
+      .map((script) => extractScriptFileRef(script))
+      .filter((value): value is string => Boolean(value)),
+  )];
+
   const input: InvestigationInput = {
     packagePath,
     packageName: inventory.metadata.name ?? "",
@@ -74,6 +100,11 @@ export async function investigate(
     staticProofSummaries: triage.focusAreas.map((fa) =>
       `${fa.file}${fa.lines ? `:${fa.lines}` : ""}: ${fa.reason}`
     ),
+    inventoryScripts: inventory.scripts,
+    cliCommands,
+    mainEntrypoint: inventory.entryPoints.runtime[0] ?? null,
+    exportEntrypoints,
+    scriptReferencedFiles,
   };
 
   // Start sandbox
@@ -87,7 +118,7 @@ export async function investigate(
   try {
     await sandbox.start(packagePath);
 
-    const output = await runInvestigationAgent(input, sandbox, lifecycleHooks, llmRuntime, emit, log);
+    const output = await runInvestigationAgent(input, sandbox, lifecycleHooks, triage, llmRuntime, emit, log);
 
     // Emit findings for frontend visualization
     for (const finding of output.findings) {
@@ -111,9 +142,16 @@ export async function investigate(
         fileLine: finding.fileLine,
         problem: finding.problem,
         evidence: finding.evidence.slice(0, 500),
-        kind: finding.confidence === "CONFIRMED" ? "AI_DYNAMIC" : "AI_STATIC",
+        entrypointId: finding.entrypointId,
+        sinkKind: finding.sinkKind,
+        proofType: finding.proofType,
+        evidenceNodeIds: finding.evidenceNodeIds,
+        kind:
+          finding.proofType === "verified" ? "TEST_CONFIRMED" :
+          finding.proofType === "observed" ? "AI_DYNAMIC" :
+          "AI_STATIC",
         contentHash: null,
-        reproducible: finding.confidence === "CONFIRMED",
+        reproducible: finding.proofType !== "static",
         reproductionCmd: null,
         testFile: null,
         testHash: null,
@@ -128,6 +166,10 @@ export async function investigate(
       capabilities: [...capabilities],
       proofs,
       findings: output.findings,
+      stageSummaries: output.stageSummaries,
+      prioritizedEntrypoints: output.prioritizedEntrypoints,
+      familyAnalyses: output.familyAnalyses,
+      evidenceGraph: output.evidenceGraph,
       toolCalls: output.toolCalls,
       agentText: output.agentText,
     };

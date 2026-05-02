@@ -19,6 +19,10 @@ import type {
   ScanWarning,
   AuditReport,
   Verdict,
+  PrioritizedEntrypoint,
+  ReasoningStageSummary,
+  FamilyAnalysis,
+  EvidenceGraph,
 } from "../lib/types";
 import { PHASE_ORDER, PHASE_LABELS } from "../lib/types";
 const API_BASE = import.meta.env.DEV ? "/api" : "";
@@ -64,6 +68,10 @@ interface AuditState {
   advisories: AdvisoryRecord[];
   advisorySummary: AdvisorySummary | null;
   scanWarnings: ScanWarning[];
+  prioritizedEntrypoints: PrioritizedEntrypoint[];
+  reasoningStageSummaries: ReasoningStageSummary[];
+  familyAnalyses: FamilyAnalysis[];
+  evidenceGraph: EvidenceGraph | null;
 
   // Inventory metadata
   inventoryMeta: InventoryMeta | null;
@@ -112,6 +120,10 @@ const initialState = {
   advisories: [],
   advisorySummary: null,
   scanWarnings: [],
+  prioritizedEntrypoints: [],
+  reasoningStageSummaries: [],
+  familyAnalyses: [],
+  evidenceGraph: null,
   inventoryMeta: null,
   selectedFile: null,
   selectedFileContent: null,
@@ -155,7 +167,7 @@ function connectSSE(
     "file_list", "file_analyzing", "file_verdict",
     "triage_complete", "triage_progress", "inventory_meta",
     "agent_thinking", "agent_tool_call", "agent_tool_result",
-    "agent_reasoning", "finding_discovered",
+    "agent_reasoning", "finding_discovered", "investigation_stage_started", "investigation_stage_completed",
     "verify_started", "verify_test_result",
     "cli_behavior_started", "cli_command_result",
     "dependency_graph_ready", "advisory_scan_started", "advisory_match", "advisory_summary",
@@ -466,6 +478,34 @@ export const useAuditStore = create<AuditState>((set, get) => ({
         break;
       }
 
+      case "investigation_stage_started": {
+        const label = event.family
+          ? `Investigation (${event.family.replace(/_/g, " ")})`
+          : `Investigation stage: ${event.stage.replace(/_/g, " ")}`;
+        set({
+          pipelineLog: [...state.pipelineLog, {
+            kind: "info" as const,
+            text: `${label} started`,
+            timestamp: event.timestamp,
+          }],
+        });
+        break;
+      }
+
+      case "investigation_stage_completed": {
+        const label = event.family
+          ? `${event.family.replace(/_/g, " ")}: ${event.summary}`
+          : `${event.stage.replace(/_/g, " ")}: ${event.summary}`;
+        set({
+          pipelineLog: [...state.pipelineLog, {
+            kind: "info" as const,
+            text: label,
+            timestamp: event.timestamp,
+          }],
+        });
+        break;
+      }
+
       case "cli_behavior_started": {
         set({
           cliBehavior: {
@@ -615,6 +655,10 @@ export const useAuditStore = create<AuditState>((set, get) => ({
                   advisories: hydrated.advisories ?? state.advisories,
                   advisorySummary: hydrated.advisorySummary ?? state.advisorySummary,
                   scanWarnings: hydrated.scanWarnings ?? state.scanWarnings,
+                  prioritizedEntrypoints: hydrated.prioritizedEntrypoints ?? state.prioritizedEntrypoints,
+                  reasoningStageSummaries: hydrated.reasoningStageSummaries ?? state.reasoningStageSummaries,
+                  familyAnalyses: hydrated.familyAnalyses ?? state.familyAnalyses,
+                  evidenceGraph: hydrated.evidenceGraph ?? state.evidenceGraph,
                 });
               }
             })

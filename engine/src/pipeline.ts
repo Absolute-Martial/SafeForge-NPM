@@ -72,6 +72,10 @@ function buildAuditReport(input: {
   triage: AuditReport["triage"];
   findings: AuditReport["findings"];
   proofs: AuditReport["proofs"];
+  prioritizedEntrypoints: AuditReport["prioritizedEntrypoints"];
+  reasoningStageSummaries: AuditReport["reasoningStageSummaries"];
+  familyAnalyses: AuditReport["familyAnalyses"];
+  evidenceGraph: AuditReport["evidenceGraph"];
   cliBehaviorCapabilities: AuditReport["capabilities"];
   trace: AuditReport["trace"];
   llmEnabled: boolean;
@@ -104,6 +108,10 @@ function buildAuditReport(input: {
     scanWarnings: input.scanWarnings,
     cliBehavior: input.cliBehavior,
     findings: input.findings,
+    prioritizedEntrypoints: input.prioritizedEntrypoints,
+    reasoningStageSummaries: input.reasoningStageSummaries,
+    familyAnalyses: input.familyAnalyses,
+    evidenceGraph: input.evidenceGraph,
     trace: input.trace,
   };
 }
@@ -337,6 +345,10 @@ export async function runAudit(
         cliBehaviorCapabilities: [],
         llmEnabled,
         triage: null,
+        prioritizedEntrypoints: [],
+        reasoningStageSummaries: [],
+        familyAnalyses: [],
+        evidenceGraph: { entrypoints: [], nodes: [], edges: [] },
         proofs: [Proof.parse({
           confidence: "CONFIRMED",
           confidenceScore: 10,
@@ -379,6 +391,10 @@ export async function runAudit(
         llmEnabled,
         triage: deterministicTriage,
         proofs: finalProofs,
+        prioritizedEntrypoints: [],
+        reasoningStageSummaries: [],
+        familyAnalyses: [],
+        evidenceGraph: { entrypoints: [], nodes: [], edges: [] },
         trace,
       });
       emit?.("triage_complete", {
@@ -448,6 +464,10 @@ export async function runAudit(
         llmEnabled,
         triage,
         proofs: matchedAdvisoryProofs,
+        prioritizedEntrypoints: [],
+        reasoningStageSummaries: [],
+        familyAnalyses: [],
+        evidenceGraph: { entrypoints: [], nodes: [], edges: [] },
         trace,
       });
       emit?.("verdict_reached", {
@@ -474,6 +494,10 @@ export async function runAudit(
         llmEnabled,
         triage,
         proofs: [...matchedAdvisoryProofs, ...cliBehaviorProofs],
+        prioritizedEntrypoints: [],
+        reasoningStageSummaries: [],
+        familyAnalyses: [],
+        evidenceGraph: { entrypoints: [], nodes: [], edges: [] },
         trace,
       });
       emit?.("verdict_reached", {
@@ -505,6 +529,10 @@ export async function runAudit(
           problem: f.problem,
         })),
         proofCount: inv.proofs.length,
+        stageSummaries: inv.stageSummaries,
+        prioritizedEntrypoints: inv.prioritizedEntrypoints,
+        familyAnalyses: inv.familyAnalyses,
+        evidenceGraph: inv.evidenceGraph,
         toolCalls: inv.toolCalls.map((tc) => ({
           tool: tc.tool,
           args: tc.args,
@@ -564,6 +592,10 @@ export async function runAudit(
       llmEnabled,
       triage,
       proofs: finalProofs,
+      prioritizedEntrypoints: investigationResult.prioritizedEntrypoints,
+      reasoningStageSummaries: investigationResult.stageSummaries,
+      familyAnalyses: investigationResult.familyAnalyses,
+      evidenceGraph: investigationResult.evidenceGraph,
       trace,
     });
     console.log(`[pipeline] verdict: ${report.verdict} (${report.finalScore}/100, ${finalProofs.length} proofs)`);
