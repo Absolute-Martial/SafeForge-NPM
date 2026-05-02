@@ -1,4 +1,7 @@
 // Mirror of engine event types and data structures
+export type NodeVersion = "22" | "24";
+export type SecurityMode = "strict" | "balanced" | "research";
+export type Verdict = "SAFE" | "REVIEW REQUIRED" | "HIGH RISK" | "BLOCK";
 
 export interface FileRecord {
   path: string;
@@ -115,6 +118,10 @@ export interface DependencyGraphReport {
   nodeCount: number;
   directCount: number;
   maxDepth: number;
+  maxObservedDepth: number;
+  scanDepthApplied: number;
+  truncated: boolean;
+  truncatedNodeCount: number;
   nodes: DependencyGraphNode[];
 }
 
@@ -164,7 +171,7 @@ export interface AuditLlmOverride {
 }
 
 export interface AuditSandboxOptions {
-  nodeVersions: Array<"20" | "22">;
+  nodeVersions: NodeVersion[];
   cliBehaviorEnabled: boolean;
   aiScenariosEnabled: boolean;
 }
@@ -172,6 +179,39 @@ export interface AuditSandboxOptions {
 export interface AuditStartOptions {
   llm?: AuditLlmOverride;
   sandbox?: AuditSandboxOptions;
+  publish?: boolean;
+  scanDepth?: number;
+  securityMode?: SecurityMode;
+}
+
+export interface AppSettings {
+  llmEnabled: boolean;
+  llmBackend: "anthropic" | "openai_compatible";
+  llmBaseUrl: string;
+  llmApiKey?: string;
+  triageModel: string;
+  investigationModel: string;
+  testGenModel: string;
+  githubToken?: string;
+  nvdApiKey?: string;
+  defaultNodeVersions: NodeVersion[];
+  defaultScanDepth: number;
+  defaultSecurityMode: SecurityMode;
+  cliBehaviorEnabled: boolean;
+  aiScenariosEnabled: boolean;
+  publishEnabled: boolean;
+  sandboxImage: string;
+  sandboxMemoryMb: number;
+  sandboxCpus: number;
+  sandboxNetwork: string;
+  maxDockerExecTimeoutSec: number;
+  runtimeRoot?: string;
+  runtimeHostRoot?: string;
+}
+
+export interface SettingsResponse {
+  settings: AppSettings;
+  configPath: string;
 }
 
 export type FileStatus = "pending" | "analyzing" | "safe" | "suspicious" | "dangerous";
@@ -212,7 +252,11 @@ export interface InventoryMeta {
 }
 
 export interface AuditReport {
-  verdict: "SAFE" | "DANGEROUS";
+  verdict: Verdict;
+  finalScore: number;
+  recommendedAction: string;
+  scanDepthApplied: number;
+  securityModeApplied: SecurityMode;
   capabilities: string[];
   proofs: Proof[];
   triage: {
@@ -299,7 +343,7 @@ export interface FindingDiscoveredEvent extends BaseEvent {
 
 export interface VerdictReachedEvent extends BaseEvent {
   type: "verdict_reached";
-  verdict: "SAFE" | "DANGEROUS";
+  verdict: Verdict;
   capabilities: string[];
   proofCount: number;
 }
@@ -374,6 +418,23 @@ export interface AdvisorySummaryEvent extends BaseEvent {
   warnings: ScanWarning[];
 }
 
+export interface PublishCompleteEvent extends BaseEvent {
+  type: "publish_complete";
+  reportCid: string;
+  sourceCid: string;
+  ensName: string | null;
+}
+
+export interface PublishFailedEvent extends BaseEvent {
+  type: "publish_failed";
+  error: string;
+}
+
+export interface AuditCompleteEvent extends BaseEvent {
+  type: "audit_complete";
+  published: boolean;
+}
+
 export type SSEEvent =
   | AuditStartedEvent
   | PhaseStartedEvent
@@ -398,7 +459,10 @@ export type SSEEvent =
   | DependencyGraphReadyEvent
   | AdvisoryScanStartedEvent
   | AdvisoryMatchEvent
-  | AdvisorySummaryEvent;
+  | AdvisorySummaryEvent
+  | PublishCompleteEvent
+  | PublishFailedEvent
+  | AuditCompleteEvent;
 
 export const PHASE_ORDER = ["resolve", "inventory", "dependency-graph", "advisory-scan", "cli-behavior", "triage", "investigation", "test-gen", "verify"] as const;
 

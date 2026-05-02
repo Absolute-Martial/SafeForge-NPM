@@ -1,6 +1,6 @@
 import { config, SOURCE_FILE_TYPES } from "./config.js";
 import { Proof, type AuditReport, type PhaseLog } from "./models.js";
-import type { AuditRunOptions } from "./audit-options.js";
+import { normalizeAuditRunOptions, type AuditRunOptions } from "./audit-options.js";
 import { resolvePackage, cleanupPackage } from "./phases/resolve.js";
 import { analyzeInventory } from "./phases/inventory.js";
 import { buildDependencyGraph } from "./phases/dependency-graph.js";
@@ -13,6 +13,8 @@ import { verifyProofs } from "./phases/verify.js";
 import { startAuditLog, type AuditLogger } from "./audit-log.js";
 import type { EmitFn } from "./events.js";
 import { setSessionPackagePath } from "./events.js";
+import { isLlmEnabled } from "./llm.js";
+import { deriveCapabilityTags, scoreAudit } from "./scoring.js";
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -58,6 +60,54 @@ export interface AuditResult {
   cleanup: () => void;
 }
 
+function buildAuditReport(input: {
+  securityMode: AuditRunOptions["securityMode"];
+  scanDepth: number;
+  inventory: Awaited<ReturnType<typeof analyzeInventory>>;
+  dependencyGraph: NonNullable<AuditReport["dependencyGraph"]>;
+  advisories: AuditReport["advisories"];
+  advisorySummary: AuditReport["advisorySummary"];
+  scanWarnings: AuditReport["scanWarnings"];
+  cliBehavior: AuditReport["cliBehavior"];
+  triage: AuditReport["triage"];
+  findings: AuditReport["findings"];
+  proofs: AuditReport["proofs"];
+  cliBehaviorCapabilities: AuditReport["capabilities"];
+  trace: AuditReport["trace"];
+  llmEnabled: boolean;
+}): AuditReport {
+  const capabilities = deriveCapabilityTags(input.findings, input.proofs, input.cliBehaviorCapabilities);
+  const score = scoreAudit({
+    securityMode: input.securityMode,
+    inventory: input.inventory,
+    advisories: input.advisories,
+    findings: input.findings,
+    proofs: input.proofs,
+    triage: input.triage,
+    cliBehavior: input.cliBehavior,
+    llmEnabled: input.llmEnabled,
+    maxDependencyDepth: input.dependencyGraph.maxObservedDepth,
+  });
+
+  return {
+    verdict: score.verdict,
+    finalScore: score.finalScore,
+    recommendedAction: score.recommendedAction,
+    scanDepthApplied: input.scanDepth,
+    securityModeApplied: input.securityMode,
+    capabilities,
+    proofs: input.proofs,
+    triage: input.triage,
+    dependencyGraph: input.dependencyGraph,
+    advisories: input.advisories,
+    advisorySummary: input.advisorySummary,
+    scanWarnings: input.scanWarnings,
+    cliBehavior: input.cliBehavior,
+    findings: input.findings,
+    trace: input.trace,
+  };
+}
+
 function advisoryProofs(advisories: NonNullable<AuditReport["advisories"]>): Proof[] {
   return advisories
     .filter((advisory) => advisory.malware || advisory.severity === "critical" || advisory.severity === "high")
@@ -92,6 +142,8 @@ export async function runAudit(
   console.log(`[pipeline] starting audit for ${packageName}${version ? `@${version}` : ""}`);
   const log = startAuditLog(packageName);
   const trace: PhaseLog[] = [];
+  const normalizedOptions = normalizeAuditRunOptions(options);
+  const llmEnabled = isLlmEnabled(normalizedOptions.llm);
 
   emit?.("audit_started", { packageName });
 
@@ -145,13 +197,15 @@ export async function runAudit(
 
     const { result: dependencyGraphResult, log: dependencyGraphLog } = await timedPhase(
       "dependency-graph",
-      () => buildDependencyGraph(resolved.path),
+      () => buildDependencyGraph(resolved.path, normalizedOptions.scanDepth),
       2 * 60_000,
-      { packagePath: resolved.path },
+      { packagePath: resolved.path, scanDepth: normalizedOptions.scanDepth },
       (result) => ({
         nodeCount: result.report.nodeCount,
         directCount: result.report.directCount,
         maxDepth: result.report.maxDepth,
+        maxObservedDepth: result.report.maxObservedDepth,
+        truncated: result.report.truncated,
         warningCount: result.warnings.length,
       }),
       emit,
@@ -234,23 +288,19 @@ export async function runAudit(
     let cliBehaviorProofs: NonNullable<Awaited<ReturnType<typeof runCliBehavior>>["proofs"]> = [];
     let cliBehaviorCapabilities: NonNullable<Awaited<ReturnType<typeof runCliBehavior>>["capabilities"]> = [];
 
-    if (options?.sandbox.cliBehaviorEnabled ?? true) {
+    if (normalizedOptions.sandbox.cliBehaviorEnabled) {
       const { result: cliBehaviorResult, log: cliBehaviorLog } = await timedPhase(
         "cli-behavior",
         () =>
           runCliBehavior(
             resolved.path,
-            options?.sandbox ?? {
-              nodeVersions: ["20", "22"],
-              cliBehaviorEnabled: true,
-              aiScenariosEnabled: false,
-            },
+            normalizedOptions.sandbox,
             emit,
           ),
         6 * 60_000,
         {
           packagePath: resolved.path,
-          nodeVersions: options?.sandbox?.nodeVersions ?? ["20", "22"],
+          nodeVersions: normalizedOptions.sandbox.nodeVersions,
         },
         (result) => ({
           commandsDiscovered: result.report?.commandsDiscovered.length ?? 0,
@@ -272,11 +322,21 @@ export async function runAudit(
       }
     }
 
-    // Dealbreaker -> immediate DANGEROUS
+    // Dealbreaker -> immediate BLOCK
     if (inventory.dealbreaker) {
-      const report: AuditReport = {
-        verdict: "DANGEROUS",
-        capabilities: [],
+      const report = buildAuditReport({
+        securityMode: normalizedOptions.securityMode,
+        scanDepth: normalizedOptions.scanDepth,
+        inventory,
+        dependencyGraph,
+        advisories: matchedAdvisories,
+        advisorySummary,
+        scanWarnings,
+        findings: [],
+        cliBehavior,
+        cliBehaviorCapabilities: [],
+        llmEnabled,
+        triage: null,
         proofs: [Proof.parse({
           confidence: "CONFIRMED",
           confidenceScore: 10,
@@ -286,23 +346,58 @@ export async function runAudit(
           kind: "STRUCTURAL",
           reproducible: true,
         })],
-        triage: null,
+        trace,
+      });
+      emit?.("verdict_reached", { verdict: report.verdict, capabilities: [], proofCount: report.proofs.length });
+      return { report, packagePath: resolved.path, cleanup: () => cleanupPackage(resolved) };
+    }
+
+    if (!llmEnabled) {
+      const finalProofs = [...matchedAdvisoryProofs, ...cliBehaviorProofs];
+      const deterministicTriage = {
+        riskScore: matchedAdvisoryProofs.length > 0 || cliBehaviorProofs.length > 0 ? 8 : 0,
+        riskSummary: "LLM reasoning disabled. Returning database and deterministic scan results only.",
+        focusAreas: [],
+      };
+      const report = buildAuditReport({
+        securityMode: normalizedOptions.securityMode,
+        scanDepth: normalizedOptions.scanDepth,
+        inventory,
         dependencyGraph,
         advisories: matchedAdvisories,
         advisorySummary,
-        scanWarnings,
-        findings: [],
+        scanWarnings: [
+          ...scanWarnings,
+          {
+            code: "LLM_DISABLED",
+            message: "LLM reasoning is disabled. Deep triage, investigation, test generation, and verification were skipped.",
+          },
+        ],
+        findings: cliBehaviorFindings,
         cliBehavior,
+        cliBehaviorCapabilities,
+        llmEnabled,
+        triage: deterministicTriage,
+        proofs: finalProofs,
         trace,
-      };
-      emit?.("verdict_reached", { verdict: report.verdict, capabilities: [], proofCount: report.proofs.length });
+      });
+      emit?.("triage_complete", {
+        riskScore: deterministicTriage.riskScore,
+        riskSummary: deterministicTriage.riskSummary,
+        focusAreas: [],
+      });
+      emit?.("verdict_reached", {
+        verdict: report.verdict,
+        capabilities: report.capabilities,
+        proofCount: report.proofs.length,
+      });
       return { report, packagePath: resolved.path, cleanup: () => cleanupPackage(resolved) };
     }
 
     // Phase 1a: Triage
     const { result: triageOutput, log: triageLog } = await timedPhase(
       "triage",
-      () => runTriage(resolved.path, inventory, options?.llm, emit),
+      () => runTriage(resolved.path, inventory, normalizedOptions.llm, emit),
       2 * 60_000 * timeoutScale,
       {
         sourceFiles: inventory.files
@@ -310,11 +405,11 @@ export async function runAudit(
           .map((f) => ({ path: f.path, sizeBytes: f.sizeBytes })),
         flagCount: inventory.flags.length,
         packageName: inventory.metadata.name,
-        llm: options?.llm
+        llm: normalizedOptions.llm
           ? {
-              providerName: options.llm.providerName,
-              baseUrl: options.llm.baseUrl,
-              model: options.llm.model,
+              providerName: normalizedOptions.llm.providerName,
+              baseUrl: normalizedOptions.llm.baseUrl,
+              model: normalizedOptions.llm.model,
             }
           : undefined,
       },
@@ -339,19 +434,22 @@ export async function runAudit(
 
     if (triage.riskScore < config.triageRiskThreshold && cliBehaviorProofs.length === 0) {
       console.log(`[pipeline] low risk (${triage.riskScore}) — returning SAFE`);
-      const report: AuditReport = {
-        verdict: matchedAdvisoryProofs.length > 0 ? "DANGEROUS" : "SAFE",
-        capabilities: cliBehaviorCapabilities,
-        proofs: matchedAdvisoryProofs,
-        triage,
+      const report = buildAuditReport({
+        securityMode: normalizedOptions.securityMode,
+        scanDepth: normalizedOptions.scanDepth,
+        inventory,
         dependencyGraph,
         advisories: matchedAdvisories,
         advisorySummary,
         scanWarnings,
         findings: cliBehaviorFindings,
         cliBehavior,
+        cliBehaviorCapabilities,
+        llmEnabled,
+        triage,
+        proofs: matchedAdvisoryProofs,
         trace,
-      };
+      });
       emit?.("verdict_reached", {
         verdict: report.verdict,
         capabilities: report.capabilities,
@@ -362,19 +460,22 @@ export async function runAudit(
 
     if (triage.riskScore < config.triageRiskThreshold && cliBehaviorProofs.length > 0) {
       console.log(`[pipeline] low static risk but observed ${cliBehaviorProofs.length} high-risk CLI proofs`);
-      const report: AuditReport = {
-        verdict: "DANGEROUS",
-        capabilities: cliBehaviorCapabilities,
-        proofs: [...matchedAdvisoryProofs, ...cliBehaviorProofs],
-        triage,
+      const report = buildAuditReport({
+        securityMode: normalizedOptions.securityMode,
+        scanDepth: normalizedOptions.scanDepth,
+        inventory,
         dependencyGraph,
         advisories: matchedAdvisories,
         advisorySummary,
         scanWarnings,
         findings: cliBehaviorFindings,
         cliBehavior,
+        cliBehaviorCapabilities,
+        llmEnabled,
+        triage,
+        proofs: [...matchedAdvisoryProofs, ...cliBehaviorProofs],
         trace,
-      };
+      });
       emit?.("verdict_reached", {
         verdict: report.verdict,
         capabilities: report.capabilities,
@@ -386,7 +487,7 @@ export async function runAudit(
     // Phase 1b: Investigation
     const { result: investigationResult, log: investigateLog } = await timedPhase(
       "investigation",
-      () => investigate(resolved.path, inventory, triage, triageOutput.fileVerdicts, options?.llm, emit, log),
+      () => investigate(resolved.path, inventory, triage, triageOutput.fileVerdicts, normalizedOptions.llm, emit, log),
       5 * 60_000 * timeoutScale,
       {
         riskScore: triage.riskScore,
@@ -421,7 +522,7 @@ export async function runAudit(
     // Phase 1c: Test generation
     const { result: proofs, log: testGenLog } = await timedPhase(
       "test-gen",
-      () => generateTests(investigationResult, resolved.path, options?.llm),
+      () => generateTests(investigationResult, resolved.path, normalizedOptions.llm),
       5 * 60_000 * timeoutScale,
       { proofCount: investigationResult.proofs.length, findingCount: investigationResult.findings.length },
       (p) => ({
@@ -435,7 +536,7 @@ export async function runAudit(
     // Phase 2: Proof verification (with retry loop — up to 3 attempts per failed test)
     const { result: verifiedProofs, log: verifyLog } = await timedPhase(
       "verify",
-      () => verifyProofs(proofs, resolved.path, options?.llm, emit, investigationResult.findings),
+      () => verifyProofs(proofs, resolved.path, normalizedOptions.llm, emit, investigationResult.findings),
       8 * 60_000 * timeoutScale,
       { proofCount: proofs.length, withTests: proofs.filter((x) => x.testFile).length },
       (p) => ({
@@ -448,24 +549,24 @@ export async function runAudit(
     trace.push(verifyLog);
 
     const finalProofs = [...matchedAdvisoryProofs, ...cliBehaviorProofs, ...verifiedProofs];
-    const finalCapabilities = [...new Set([...cliBehaviorCapabilities, ...investigationResult.capabilities])];
     const finalFindings = [...cliBehaviorFindings, ...investigationResult.findings];
-    const verdict = finalProofs.length > 0 ? "DANGEROUS" : "SAFE";
-    console.log(`[pipeline] verdict: ${verdict} (${finalProofs.length} proofs)`);
-
-    const report: AuditReport = {
-      verdict,
-      capabilities: finalCapabilities,
-      proofs: finalProofs,
-      triage,
+    const report = buildAuditReport({
+      securityMode: normalizedOptions.securityMode,
+      scanDepth: normalizedOptions.scanDepth,
+      inventory,
       dependencyGraph,
       advisories: matchedAdvisories,
       advisorySummary,
       scanWarnings,
       findings: finalFindings,
       cliBehavior,
+      cliBehaviorCapabilities: [...new Set([...cliBehaviorCapabilities, ...investigationResult.capabilities])],
+      llmEnabled,
+      triage,
+      proofs: finalProofs,
       trace,
-    };
+    });
+    console.log(`[pipeline] verdict: ${report.verdict} (${report.finalScore}/100, ${finalProofs.length} proofs)`);
     log.writeLog("report.json", report);
     console.log(`[pipeline] full logs saved to ${log.runDir}`);
 

@@ -339,6 +339,9 @@ export function ResultsPanel({
   const advisories = useAuditStore((s) => s.advisories);
   const advisorySummary = useAuditStore((s) => s.advisorySummary);
   const scanWarnings = useAuditStore((s) => s.scanWarnings);
+  const verdict = useAuditStore((s) => s.verdict);
+  const finalScore = useAuditStore((s) => s.finalScore);
+  const recommendedAction = useAuditStore((s) => s.recommendedAction);
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
 
   // Match each finding to a proof by fileLine (natural join key)
@@ -385,6 +388,35 @@ export function ResultsPanel({
 
       {/* Findings list — sorted by verification status */}
       <div className="flex-1 overflow-y-auto">
+        {verdict && finalScore !== null && (
+          <div style={{ padding: "16px 20px 0" }}>
+            <div
+              style={{
+                border: "1px solid var(--border)",
+                borderLeft: `3px solid ${verdict === "SAFE" ? "var(--safe)" : verdict === "REVIEW REQUIRED" ? "var(--suspected)" : "var(--danger)"}`,
+                borderRadius: "var(--radius-sm)",
+                padding: "12px 14px",
+                background: "var(--bg-primary)",
+                display: "flex",
+                flexDirection: "column",
+                gap: 6,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <span className="section-header" style={{ padding: 0 }}>{verdict}</span>
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.72rem", color: "var(--text-muted)" }}>
+                  {finalScore}/100
+                </span>
+              </div>
+              {recommendedAction && (
+                <div style={{ fontSize: "0.78rem", color: "var(--text-dim)", lineHeight: 1.6 }}>
+                  {recommendedAction}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {sortedFindings.map(({ finding: f, originalIndex }) => (
           <FindingCard
             key={originalIndex}
@@ -459,6 +491,7 @@ export function ResultsPanel({
                     ["Packages", String(dependencyGraph.nodeCount)],
                     ["Direct", String(dependencyGraph.directCount)],
                     ["Max Depth", String(dependencyGraph.maxDepth)],
+                    ["Scan Depth", String(dependencyGraph.scanDepthApplied)],
                     ["Root", `${dependencyGraph.packageName}${dependencyGraph.packageVersion ? `@${dependencyGraph.packageVersion}` : ""}`],
                   ].map(([label, value]) => (
                     <div
@@ -479,6 +512,11 @@ export function ResultsPanel({
                     </div>
                   ))}
                 </div>
+                {dependencyGraph.truncated && (
+                  <div style={{ marginTop: 10, fontSize: "0.74rem", color: "var(--text-muted)", lineHeight: 1.6 }}>
+                    Scan depth limited this graph to {dependencyGraph.scanDepthApplied}. {dependencyGraph.truncatedNodeCount} deeper package{dependencyGraph.truncatedNodeCount === 1 ? "" : "s"} were excluded from matching and display.
+                  </div>
+                )}
               </div>
             )}
 

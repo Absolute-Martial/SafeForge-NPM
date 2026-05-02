@@ -370,9 +370,10 @@ function PipelineLogItem({ entry }: { entry: PipelineLogEntry }) {
   }
 }
 
-function CompletionItem({ verdict }: { verdict: "SAFE" | "DANGEROUS" }) {
+function CompletionItem({ verdict }: { verdict: "SAFE" | "REVIEW REQUIRED" | "HIGH RISK" | "BLOCK" }) {
   const proofs = useAuditStore((s) => s.proofs);
   const findings = useAuditStore((s) => s.findings);
+  const finalScore = useAuditStore((s) => s.finalScore);
   const dealbreaker = proofs.find(
     (p) => p.kind === "STRUCTURAL" && p.evidence?.startsWith("Dealbreaker:")
   );
@@ -387,36 +388,36 @@ function CompletionItem({ verdict }: { verdict: "SAFE" | "DANGEROUS" }) {
   let icon: string;
 
   if (verdict === "SAFE") {
-    summary = "No malicious behavior detected. Package appears safe to install.";
+    summary = `No malicious behavior detected. Package appears safe to install (${finalScore ?? 0}/100).`;
     color = "var(--safe)";
     bg = "var(--safe-bg)";
     icon = "\u2713";
   } else if (dealbreaker) {
-    summary = `Dealbreaker detected — ${dealbreaker.problem}. Skipped to DANGEROUS.`;
+    summary = `Dealbreaker detected — ${dealbreaker.problem}. Escalated to ${verdict} (${finalScore ?? 0}/100).`;
     color = "var(--danger)";
     bg = "var(--danger-bg)";
     icon = "\u2717";
   } else if (verified > 0) {
     const rest = findings.length - verified;
-    summary = `${verified} finding${verified !== 1 ? "s" : ""} verified by exploit tests.${rest > 0 ? ` ${rest} additional flagged.` : ""}`;
-    color = "var(--danger)";
-    bg = "var(--danger-bg)";
+    summary = `${verified} finding${verified !== 1 ? "s" : ""} verified by exploit tests.${rest > 0 ? ` ${rest} additional flagged.` : ""} Final score ${finalScore ?? 0}/100.`;
+    color = verdict === "REVIEW REQUIRED" ? "var(--suspected)" : "var(--danger)";
+    bg = verdict === "REVIEW REQUIRED" ? "var(--suspected-bg)" : "var(--danger-bg)";
     icon = "\u2717";
   } else if (observed > 0) {
-    summary = `${observed} finding${observed !== 1 ? "s" : ""} observed at runtime but not verified by tests. Review recommended.`;
+    summary = `${observed} finding${observed !== 1 ? "s" : ""} observed at runtime but not verified by tests. ${verdict} (${finalScore ?? 0}/100).`;
     color = "var(--suspected)";
     bg = "var(--suspected-bg)";
     icon = "?";
   } else if (findings.length > 0) {
-    summary = `${findings.length} finding${findings.length !== 1 ? "s" : ""} flagged by static analysis but none verified. Manual review recommended.`;
-    color = "var(--text-muted)";
-    bg = "var(--bg-secondary)";
+    summary = `${findings.length} finding${findings.length !== 1 ? "s" : ""} flagged by static analysis but none verified. ${verdict} (${finalScore ?? 0}/100).`;
+    color = verdict === "REVIEW REQUIRED" ? "var(--suspected)" : "var(--text-muted)";
+    bg = verdict === "REVIEW REQUIRED" ? "var(--suspected-bg)" : "var(--bg-secondary)";
     icon = "?";
   } else {
-    summary = "Analysis complete. No findings.";
-    color = "var(--safe)";
-    bg = "var(--safe-bg)";
-    icon = "\u2713";
+    summary = `Analysis complete. ${verdict} (${finalScore ?? 0}/100).`;
+    color = verdict === "REVIEW REQUIRED" ? "var(--suspected)" : "var(--danger)";
+    bg = verdict === "REVIEW REQUIRED" ? "var(--suspected-bg)" : "var(--danger-bg)";
+    icon = "?";
   }
 
   return (

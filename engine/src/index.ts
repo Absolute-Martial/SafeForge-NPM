@@ -6,13 +6,17 @@ import { cors } from "hono/cors";
 import { z } from "zod";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { spawnSync } from "node:child_process";
 
 import { config } from "./config.js";
 import { runAudit } from "./pipeline.js";
 import { publishAuditResults } from "./publish.js";
 import { createSession, getSession, finalizeSession, createEmitFn, type AuditEvent } from "./events.js";
 import { cleanupPackage } from "./phases/resolve.js";
-import { AuditLlmOverrideSchema, AuditSandboxOptionsSchema, normalizeAuditRunOptions, sanitizeAuditRunOptions, type AuditRunOptions } from "./audit-options.js";
+import { AuditLlmOverrideSchema, AuditSandboxOptionsSchema, normalizeAuditRunOptions, sanitizeAuditRunOptions, SecurityModeSchema, type AuditRunOptions } from "./audit-options.js";
+import { isPublishConfigured, isRegistryReadConfigured, isRegistryWriteConfigured, readPublishedAuditStatus } from "./registry.js";
+import { getSettingsFilePath, readResolvedSettings, StoredSettingsSchema, writeSavedSettings } from "./settings-store.js";
+import { reloadConfig } from "./config.js";
 
 const app = new Hono();
 
@@ -24,6 +28,20 @@ const AuditRequest = z.object({
   version: z.string().optional(),
   llm: AuditLlmOverrideSchema.optional(),
   sandbox: AuditSandboxOptionsSchema.optional(),
+  publish: z.boolean().optional(),
+  scanDepth: z.coerce.number().int().min(0).max(5).optional(),
+  securityMode: SecurityModeSchema.optional(),
+});
+
+const RegistryPrecheckRequest = z.object({
+  packageName: z.string().min(1),
+  version: z.string().min(1),
+});
+
+const ModelDiscoveryRequest = z.object({
+  backend: z.enum(["anthropic", "openai_compatible"]).optional(),
+  baseUrl: z.string().url().optional(),
+  apiKey: z.string().optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -50,7 +68,7 @@ async function processQueue() {
     const { report, packagePath, cleanup } = await runAudit(item.packageName, item.version, item.options);
 
     // Publish to IPFS + ENS for all verdicts
-    if (process.env.PINATA_JWT) {
+    if (item.options.publish && isPublishConfigured()) {
       // Try to read version from the audited package.json
       let resolvedVersion = item.version || "latest";
       try {
@@ -82,6 +100,14 @@ function enqueueAudit(packageName: string, version: string | undefined, options:
   });
 }
 
+function parseAuditOptions(body: z.infer<typeof AuditRequest>): { ok: true; options: AuditRunOptions } | { ok: false; message: string } {
+  try {
+    return { ok: true, options: normalizeAuditRunOptions(body) };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : "Invalid audit options" };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // POST /audit — sync, waits for result
 // ---------------------------------------------------------------------------
@@ -100,7 +126,11 @@ app.post("/audit", async (c) => {
   }
 
   try {
-    const options = normalizeAuditRunOptions(parsed.data);
+    const normalized = parseAuditOptions(parsed.data);
+    if (!normalized.ok) {
+      return c.json({ error: "Invalid audit options", message: normalized.message }, 400);
+    }
+    const options = normalized.options;
     const report = await enqueueAudit(parsed.data.packageName, parsed.data.version, options);
     return c.json(report);
   } catch (err) {
@@ -128,7 +158,11 @@ app.post("/audit/stream", async (c) => {
     return c.json({ error: "Invalid request", details: parsed.error.format() }, 400);
   }
 
-  const options = normalizeAuditRunOptions(parsed.data);
+  const normalized = parseAuditOptions(parsed.data);
+  if (!normalized.ok) {
+    return c.json({ error: "Invalid audit options", message: normalized.message }, 400);
+  }
+  const options = normalized.options;
   const session = createSession(parsed.data.packageName);
   const emit = createEmitFn(session.auditId, session.emitter);
   const sanitizedOptions = sanitizeAuditRunOptions(options);
@@ -141,7 +175,7 @@ app.post("/audit/stream", async (c) => {
       finalizeSession(session.auditId, report);
 
       // Publish to IPFS + ENS for all verdicts
-      if (process.env.PINATA_JWT) {
+      if (options.publish && isPublishConfigured()) {
         let resolvedVersion = parsed.data.version || "latest";
         try {
           const pkgJson = JSON.parse(fs.readFileSync(path.join(packagePath, "package.json"), "utf-8"));
@@ -157,8 +191,12 @@ app.post("/audit/stream", async (c) => {
             console.error("[publish] failed:", err instanceof Error ? err.message : err);
             emit("publish_failed", { error: err instanceof Error ? err.message : "unknown" });
           })
-          .finally(cleanup);
+          .finally(() => {
+            emit("audit_complete", { published: true });
+            cleanup();
+          });
       } else {
+        emit("audit_complete", { published: false });
         cleanup();
       }
     })
@@ -222,7 +260,7 @@ app.get("/audit/:id/events", (c) => {
 
       // Listen for terminal events
       const terminalHandler = (event: AuditEvent) => {
-        if (event.type === "verdict_reached" || event.type === "audit_error") {
+        if (event.type === "audit_complete" || event.type === "audit_error") {
           // Give a moment for the event to be sent
           setTimeout(done, 100);
         }
@@ -282,6 +320,148 @@ app.get("/audit/:id/report", (c) => {
 });
 
 app.get("/health", (c) => c.json({ status: "ok" }));
+
+app.get("/cli/status", (c) => {
+  const dockerProbe = spawnSync("docker", ["version", "--format", "{{.Server.Version}}"], {
+    encoding: "utf-8",
+    timeout: 5_000,
+  });
+  const dockerVersion = dockerProbe.status === 0 ? dockerProbe.stdout.trim() || null : null;
+
+  return c.json({
+    status: "ok",
+    engineReachable: true,
+    dockerAvailable: dockerProbe.status === 0,
+    dockerVersion,
+    publishConfigured: isPublishConfigured(),
+    registryReadConfigured: isRegistryReadConfigured(),
+    registryWriteConfigured: isRegistryWriteConfigured(),
+    llmEnabled: config.llmEnabled,
+    llmConfigured: Boolean(config.llmApiKey),
+    llmBackend: config.llmBackend,
+    llmBaseUrlConfigured: Boolean(config.llmBaseUrl),
+    runtimeRoot: config.runtimeRoot,
+  });
+});
+
+app.get("/registry/precheck", async (c) => {
+  const parsed = RegistryPrecheckRequest.safeParse({
+    packageName: c.req.query("packageName"),
+    version: c.req.query("version"),
+  });
+  if (!parsed.success) {
+    return c.json({ error: "Invalid registry precheck request", details: parsed.error.format() }, 400);
+  }
+
+  if (!isRegistryReadConfigured()) {
+    return c.json({
+      found: false,
+      verdict: null,
+      score: null,
+      reportUri: null,
+      sourceUri: null,
+      publishedAt: null,
+      versionMatched: false,
+      ensName: null,
+      capabilities: [],
+      registryEnabled: false,
+    });
+  }
+
+  try {
+    const result = await readPublishedAuditStatus(parsed.data.packageName, parsed.data.version);
+    return c.json({ ...result, registryEnabled: true });
+  } catch (error) {
+    console.error("[registry] precheck failed:", error);
+    const message = error instanceof Error ? error.message : "Registry precheck failed";
+    return c.json({ error: message }, 500);
+  }
+});
+
+app.get("/settings", (c) => {
+  const settings = readResolvedSettings();
+  return c.json({
+    settings,
+    configPath: getSettingsFilePath(),
+  });
+});
+
+app.put("/settings", async (c) => {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+
+  const parsed = StoredSettingsSchema.partial().safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "Invalid settings payload", details: parsed.error.format() }, 400);
+  }
+
+  try {
+    const settings = writeSavedSettings(parsed.data);
+    reloadConfig();
+    return c.json({
+      settings,
+      configPath: getSettingsFilePath(),
+    });
+  } catch (error) {
+    return c.json(
+      { error: error instanceof Error ? error.message : "Failed to save settings" },
+      500,
+    );
+  }
+});
+
+app.post("/settings/models", async (c) => {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    body = {};
+  }
+
+  const parsed = ModelDiscoveryRequest.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "Invalid model discovery request", details: parsed.error.format() }, 400);
+  }
+
+  const backend = parsed.data.backend ?? config.llmBackend;
+  if (backend !== "openai_compatible") {
+    return c.json({ models: [], warning: "Model discovery is currently implemented for OpenAI-compatible providers only." });
+  }
+
+  const baseUrl = parsed.data.baseUrl ?? config.llmBaseUrl;
+  const apiKey = parsed.data.apiKey ?? config.llmApiKey;
+  if (!baseUrl) {
+    return c.json({ error: "A base URL is required for model discovery" }, 400);
+  }
+
+  try {
+    const modelsUrl = new URL("models", baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`);
+    const response = await fetch(modelsUrl, {
+      headers: {
+        "content-type": "application/json",
+        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+      },
+    });
+
+    if (!response.ok) {
+      return c.json({ error: `Model discovery failed with ${response.status} ${response.statusText}` }, 502);
+    }
+
+    const payload = await response.json() as { data?: Array<{ id?: string }> };
+    const models = (payload.data ?? [])
+      .map((entry) => entry.id)
+      .filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+      .sort((left, right) => left.localeCompare(right));
+
+    return c.json({ models });
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Model discovery failed" }, 502);
+  }
+});
 
 // ---------------------------------------------------------------------------
 // /api/* mirror — so frontend can use /api prefix in both dev and production

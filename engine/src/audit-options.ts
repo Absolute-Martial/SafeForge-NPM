@@ -1,7 +1,11 @@
 import { z } from "zod";
+import { config } from "./config.js";
+import { isLlmEnabled } from "./llm.js";
 
-export const NodeVersionSchema = z.enum(["20", "22"]);
+export const NodeVersionSchema = z.enum(["22", "24"]);
 export type NodeVersion = z.infer<typeof NodeVersionSchema>;
+export const SecurityModeSchema = z.enum(["strict", "balanced", "research"]);
+export type SecurityMode = z.infer<typeof SecurityModeSchema>;
 
 export const AuditLlmOverrideSchema = z.object({
   providerName: z.string().trim().min(1).optional(),
@@ -12,21 +16,27 @@ export const AuditLlmOverrideSchema = z.object({
 export type AuditLlmOverride = z.infer<typeof AuditLlmOverrideSchema>;
 
 export const AuditSandboxOptionsSchema = z.object({
-  nodeVersions: z.array(NodeVersionSchema).min(1).default(["20", "22"]),
-  cliBehaviorEnabled: z.boolean().default(true),
-  aiScenariosEnabled: z.boolean().default(false),
+  nodeVersions: z.array(NodeVersionSchema).min(1),
+  cliBehaviorEnabled: z.boolean(),
+  aiScenariosEnabled: z.boolean(),
 });
 export type AuditSandboxOptions = z.infer<typeof AuditSandboxOptionsSchema>;
 
-export const AuditRunOptionsSchema = z.object({
+export const AuditRunOptionsInputSchema = z.object({
   llm: AuditLlmOverrideSchema.optional(),
-  sandbox: AuditSandboxOptionsSchema.default({
-    nodeVersions: ["20", "22"],
-    cliBehaviorEnabled: true,
-    aiScenariosEnabled: false,
-  }),
+  sandbox: AuditSandboxOptionsSchema.optional(),
+  publish: z.boolean().optional(),
+  scanDepth: z.coerce.number().int().min(0).max(5).optional(),
+  securityMode: SecurityModeSchema.optional(),
 });
-export type AuditRunOptions = z.infer<typeof AuditRunOptionsSchema>;
+
+export interface AuditRunOptions {
+  llm?: AuditLlmOverride;
+  sandbox: AuditSandboxOptions;
+  publish: boolean;
+  scanDepth: number;
+  securityMode: SecurityMode;
+}
 
 export interface SanitizedAuditRunOptions {
   llm?: {
@@ -35,18 +45,34 @@ export interface SanitizedAuditRunOptions {
     model?: string;
   };
   sandbox: AuditSandboxOptions;
+  publish: boolean;
+  scanDepth: number;
+  securityMode: SecurityMode;
 }
 
 export function normalizeAuditRunOptions(input?: Partial<AuditRunOptions>): AuditRunOptions {
-  const parsed = AuditRunOptionsSchema.parse(input ?? {});
-  const dedupedNodeVersions = [...new Set(parsed.sandbox.nodeVersions)];
-  return {
+  const parsed = AuditRunOptionsInputSchema.parse(input ?? {});
+  const sandbox = AuditSandboxOptionsSchema.parse({
+    nodeVersions: parsed.sandbox?.nodeVersions ?? config.defaultNodeVersions,
+    cliBehaviorEnabled: parsed.sandbox?.cliBehaviorEnabled ?? config.cliBehaviorEnabled,
+    aiScenariosEnabled: parsed.sandbox?.aiScenariosEnabled ?? config.aiScenariosEnabled,
+  });
+  const dedupedNodeVersions = [...new Set(sandbox.nodeVersions)];
+  const normalized: AuditRunOptions = {
     ...parsed,
     sandbox: {
-      ...parsed.sandbox,
+      ...sandbox,
       nodeVersions: dedupedNodeVersions,
     },
+    publish: parsed.publish ?? config.publishEnabled,
+    scanDepth: parsed.scanDepth ?? config.defaultScanDepth,
+    securityMode: parsed.securityMode ?? config.defaultSecurityMode,
   };
+
+  if (normalized.securityMode === "research" && !isLlmEnabled(normalized.llm)) {
+    throw new Error("Research mode requires LLM configuration. Enable LLM settings or choose Strict/Balanced mode.");
+  }
+  return normalized;
 }
 
 export function sanitizeAuditRunOptions(options?: AuditRunOptions): SanitizedAuditRunOptions {
@@ -62,5 +88,8 @@ export function sanitizeAuditRunOptions(options?: AuditRunOptions): SanitizedAud
   return {
     llm,
     sandbox: normalized.sandbox,
+    publish: normalized.publish,
+    scanDepth: normalized.scanDepth,
+    securityMode: normalized.securityMode,
   };
 }

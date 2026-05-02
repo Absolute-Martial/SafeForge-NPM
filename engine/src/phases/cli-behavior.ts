@@ -272,7 +272,7 @@ function writeInstrumentationFile(workDir: string): void {
 }
 
 function createPackageTarball(packagePath: string, workDir: string): string {
-  const output = execFileSync("npm", ["pack", packagePath, "--pack-destination", workDir], {
+  const output = execFileSync("npm", ["pack", packagePath, "--ignore-scripts", "--pack-destination", workDir], {
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "pipe"],
   });

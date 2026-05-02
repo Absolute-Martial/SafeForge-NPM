@@ -4,8 +4,11 @@ import { z } from "zod";
 // Enums
 // ---------------------------------------------------------------------------
 
-export const VerdictEnum = z.enum(["SAFE", "DANGEROUS"]);
+export const VerdictEnum = z.enum(["SAFE", "REVIEW REQUIRED", "HIGH RISK", "BLOCK"]);
 export type VerdictEnum = z.infer<typeof VerdictEnum>;
+
+export const SecurityModeEnum = z.enum(["strict", "balanced", "research"]);
+export type SecurityModeEnum = z.infer<typeof SecurityModeEnum>;
 
 export const CapabilityEnum = z.enum([
   // Network / exfiltration
@@ -327,6 +330,10 @@ export const DependencyGraphReport = z.object({
   nodeCount: z.number().int().min(0).default(0),
   directCount: z.number().int().min(0).default(0),
   maxDepth: z.number().int().min(0).default(0),
+  maxObservedDepth: z.number().int().min(0).default(0),
+  scanDepthApplied: z.number().int().min(0).max(5).default(3),
+  truncated: z.boolean().default(false),
+  truncatedNodeCount: z.number().int().min(0).default(0),
   nodes: z.array(DependencyGraphNode).default([]),
 });
 export type DependencyGraphReport = z.infer<typeof DependencyGraphReport>;
@@ -385,6 +392,10 @@ export type ScanWarning = z.infer<typeof ScanWarning>;
 
 export const AuditReport = z.object({
   verdict: VerdictEnum,
+  finalScore: z.number().int().min(0).max(100).default(0),
+  recommendedAction: z.string().default("Proceed with caution."),
+  scanDepthApplied: z.number().int().min(0).max(5).default(3),
+  securityModeApplied: SecurityModeEnum.default("balanced"),
   capabilities: z.array(CapabilityEnum).default([]),
   proofs: z.array(Proof).default([]),
   triage: TriageResult.nullable().default(null),

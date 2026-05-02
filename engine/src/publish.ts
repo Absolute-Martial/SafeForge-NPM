@@ -289,7 +289,7 @@ export async function publishAuditResults(
         [`${TEXT_RECORD_PREFIX}.package`]: packageName,
         [`${TEXT_RECORD_PREFIX}.version`]: version,
         [`${TEXT_RECORD_PREFIX}.verdict`]: report.verdict.toLowerCase(),
-        [`${TEXT_RECORD_PREFIX}.score`]: report.triage?.riskScore?.toString() ?? "0",
+        [`${TEXT_RECORD_PREFIX}.score`]: report.finalScore.toString(),
         [`${TEXT_RECORD_PREFIX}.report_cid`]: reportUpload.cid,
         [`${TEXT_RECORD_PREFIX}.report_uri`]: reportUpload.gatewayUrl,
         [`${TEXT_RECORD_PREFIX}.source_cid`]: sourceUpload.cid,
@@ -303,7 +303,7 @@ export async function publishAuditResults(
       await writeRecords(publicClient, walletClient, account, resolverAddress, parentStatus.node, {
         [`${TEXT_RECORD_PREFIX}.latest_version`]: version,
         [`${TEXT_RECORD_PREFIX}.latest_verdict`]: report.verdict.toLowerCase(),
-        [`${TEXT_RECORD_PREFIX}.latest_score`]: report.triage?.riskScore?.toString() ?? "0",
+        [`${TEXT_RECORD_PREFIX}.latest_score`]: report.finalScore.toString(),
         [`${TEXT_RECORD_PREFIX}.latest_report_cid`]: reportUpload.cid,
         [`${TEXT_RECORD_PREFIX}.latest_report_uri`]: reportUpload.gatewayUrl,
         [`${TEXT_RECORD_PREFIX}.latest_source_cid`]: sourceUpload.cid,

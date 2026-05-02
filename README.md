@@ -16,16 +16,18 @@ Users can keep server defaults in `.env` or override provider, base URL, model, 
 ## Current MVP
 
 - package input with `package` or `package@version`
+- terminal-native `safenpm scan` and `safenpm doctor` commands
+- settings-first web UI backed by `settings.local.json`
 - recursive dependency graph construction from a generated lockfile
 - OSV matching with optional GHSA enrichment and CVE enrichment from NVD
 - recursive inventory and structural risk scanning
 - AI triage and investigation with server-default or per-scan OpenAI-compatible providers
-- vendored `npm-package-tester` command discovery defaults with SafeForge-owned instrumentation
+- native SafeForge CLI discovery and Docker sandboxing inspired by `npm-package-tester`
 - Docker sandbox execution for `--help`, `--version`, and no-args runs
-- Node 20 and Node 22 CLI behavior checks
+- Node 22 and Node 24 LTS CLI behavior checks
 - runtime observation for network, env access, child processes, filesystem writes, eval/function usage, and timeout anomalies
 - dependency/advisory warnings and explainable affected paths
-- explainable `SAFE` or `DANGEROUS` verdicts
+- explainable `SAFE`, `REVIEW REQUIRED`, `HIGH RISK`, or `BLOCK` verdicts
 
 ## Architecture
 
@@ -58,12 +60,12 @@ Static Risk Scanner
         |
         v
 CLI Discovery
-        `-- vendored npm-package-tester analyzer
+        `-- native SafeForge bin discovery
         |
         v
 CLI Behavior Sandbox
-        |-- Node 20
         |-- Node 22
+        |-- Node 24
         |-- --help
         |-- --version
         `-- no-args
@@ -78,34 +80,50 @@ Proof Generation + Verification
 Explainable Verdict
 ```
 
-## Provider-Agnostic LLM Setup
+## Settings-First Setup
 
-Server defaults still come from environment variables:
+The web app now opens on a settings-first control surface. Saving that form writes local engine configuration to:
+
+```text
+settings.local.json
+```
+
+That file can hold:
+
+```json
+{
+  "llmEnabled": true,
+  "llmBackend": "openai_compatible",
+  "llmBaseUrl": "https://api.openai.com/v1",
+  "llmApiKey": "your_key",
+  "triageModel": "gpt-4.1-mini",
+  "investigationModel": "gpt-4.1",
+  "testGenModel": "gpt-4.1",
+  "githubToken": "ghp_...",
+  "nvdApiKey": "nvd_...",
+  "defaultNodeVersions": ["22", "24"],
+  "defaultScanDepth": 3,
+  "defaultSecurityMode": "balanced",
+  "cliBehaviorEnabled": true,
+  "publishEnabled": true
+}
+```
+
+The settings page can also query `/models` from any OpenAI-compatible base URL through the engine, so model dropdowns can populate without exposing provider API calls directly to the browser.
+
+If `llmEnabled` is off, SafeForge skips LLM triage/investigation/test generation and returns database plus deterministic scan results only.
+
+Environment variables are still supported as fallback defaults:
 
 ```bash
 SAFEFORGE_NPM_LLM_BACKEND=openai_compatible
 SAFEFORGE_NPM_LLM_BASE_URL=https://api.openai.com/v1
 SAFEFORGE_NPM_LLM_API_KEY=your_server_default_key
-
-SAFEFORGE_NPM_TRIAGE_MODEL=gpt-4.1-mini
-SAFEFORGE_NPM_INVESTIGATION_MODEL=gpt-4.1
-SAFEFORGE_NPM_TEST_GEN_MODEL=gpt-4.1
 ```
-
-At scan time, the dashboard can override those defaults with any OpenAI-compatible provider such as OpenAI, OpenRouter, Groq, or a custom endpoint.
-
-Advisory enrichment is optional:
-
-```bash
-SAFEFORGE_NPM_GITHUB_TOKEN=ghp_...
-SAFEFORGE_NPM_NVD_API_KEY=...
-```
-
-If the GitHub token is missing, SafeForge still scans with OSV and emits a scan warning instead of failing.
 
 ## CLI Behavior Sandbox
 
-SafeForge NPM vendors `npm-package-tester` under `third_party/npm-package-tester/` and uses that snapshot as the default CLI discovery backend, while keeping runtime instrumentation, policy logic, and verdict shaping inside SafeForge.
+SafeForge NPM uses native `package.json#bin` discovery plus Docker sandbox execution, with the workflow inspired by `npm-package-tester` rather than depending on its full runtime package.
 
 For each discovered CLI command, SafeForge runs:
 
@@ -124,7 +142,7 @@ Those commands execute inside constrained Docker sandboxes with runtime instrume
 - evaluates dynamic code
 - times out or emits suspiciously large output
 
-High-risk observed behavior is promoted directly into findings and can independently produce a `DANGEROUS` verdict even when static triage is otherwise low.
+High-risk observed behavior is promoted directly into findings and materially increases the final 0-100 score, even when static triage is otherwise low.
 
 ## Advisory Pipeline
 
@@ -135,7 +153,7 @@ For every resolved package version in the dependency graph, SafeForge:
 3. enriches CVE aliases from NVD
 4. deduplicates results into one advisory record with severity, fixed version, aliases, and dependency path context
 
-High and critical advisories, plus malware-style advisories, currently promote the package to `DANGEROUS`.
+High and critical advisories, plus malware-style advisories, materially raise the final score and can drive the verdict into `HIGH RISK` or `BLOCK`.
 
 ## Running It
 
@@ -152,6 +170,36 @@ Open:
 ```text
 http://127.0.0.1:8000
 ```
+
+The first screen is the settings page. Configure your provider, models, and vulnerability-enrichment tokens there, save them, and then run scans from the same page.
+
+## Terminal CLI
+
+SafeForge now ships a terminal-native wrapper in `cli/`:
+
+```bash
+npm --prefix cli install
+npm --prefix cli run build
+node cli/dist/index.js doctor
+node cli/dist/index.js scan event-stream@3.3.6
+```
+
+Once the package is published, the intended entrypoint is:
+
+```bash
+safenpm doctor
+safenpm scan event-stream@3.3.6
+```
+
+Useful flags:
+
+```bash
+safenpm scan lodash@4.17.21 --rescan --json --no-publish
+safenpm scan eslint@9.0.0 --node-version 22 --node-version 24 --scan-depth 2 --security-mode balanced
+safenpm scan react@19.0.0 --provider openai --base-url https://api.openai.com/v1 --model gpt-4.1-mini --api-key "$SAFEFORGE_NPM_SCAN_API_KEY"
+```
+
+The CLI talks to a running SafeForge engine API, defaults to `http://127.0.0.1:8000`, reuses an existing published verdict when registry reads are configured and an exact version audit already exists, and falls back to a fresh scan when `--rescan` is set.
 
 ## Local Development
 
@@ -186,9 +234,13 @@ npm run build
 The current implementation has been verified with:
 
 - `npm --prefix engine run build`
+- `npm --prefix cli run build`
+- `npx --prefix cli tsx --test cli/tests/unit/args.test.ts`
 - `npm --prefix frontend run lint`
 - `npm --prefix frontend run build`
-- `curl http://127.0.0.1:8000/health`
+- `npx --prefix engine tsx --test engine/tests/unit/audit-options.test.ts engine/tests/unit/config.test.ts engine/tests/unit/models.test.ts engine/tests/unit/scoring.test.ts`
+- `node cli/dist/index.js doctor --api-url http://127.0.0.1:8124 --json`
+- `node cli/dist/index.js scan is-number@7.0.0 --api-url http://127.0.0.1:8124 --json --no-publish`
 - targeted engine unit tests for audit option sanitization, CLI command detection, runtime risk mapping, provider override behavior, config loading, and sandbox instrumentation
 
 ## Credits
@@ -202,4 +254,4 @@ SafeForge NPM builds on prior open-source ideas and reworks them into a provider
 
 Vulnhuntr informs the staged AI-assisted reasoning workflow and confidence shaping.
 
-npm-package-tester informs CLI discovery, Docker execution patterns, Node-version test matrices, and scenario-driven sandbox behavior checks. A vendored source snapshot is included under `third_party/npm-package-tester/` with its upstream license preserved.
+npm-package-tester informs CLI discovery, Docker execution patterns, Node-version test matrices, and scenario-driven sandbox behavior checks.
