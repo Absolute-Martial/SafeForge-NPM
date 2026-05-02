@@ -73,6 +73,20 @@ export interface AdvisorySummaryEvent extends AuditEvent {
   summary: AdvisorySummary;
   warnings: ScanWarning[];
 }
+export interface PublishCompleteEvent extends AuditEvent {
+  type: "publish_complete";
+  reportCid: string;
+  sourceCid: string;
+  ensName: string | null;
+}
+export interface PublishFailedEvent extends AuditEvent {
+  type: "publish_failed";
+  error: string;
+}
+export interface AuditComplete extends AuditEvent {
+  type: "audit_complete";
+  published: boolean;
+}
 export interface AuditError extends AuditEvent { type: "audit_error"; error: string }
 
 // ---------------------------------------------------------------------------
@@ -155,4 +169,5 @@ export function finalizeSession(auditId: string, report: AuditReport | null, err
     if (session.cleanupFn) session.cleanupFn();
     sessions.delete(auditId);
   }, SESSION_TTL_MS);
+  session.cleanupTimer.unref?.();
 }

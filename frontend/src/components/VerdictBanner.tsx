@@ -3,6 +3,7 @@ import { useAuditStore } from "../stores/auditStore";
 
 export function VerdictBanner() {
   const verdict = useAuditStore((s) => s.verdict);
+  const finalScore = useAuditStore((s) => s.finalScore);
   const capabilities = useAuditStore((s) => s.capabilities);
   const findings = useAuditStore((s) => s.findings);
   const proofs = useAuditStore((s) => s.proofs);
@@ -35,36 +36,24 @@ export function VerdictBanner() {
   const rest = findings.length - verified - observed;
 
   // Derive display label + color from what was actually proven
-  let displayLabel: string;
-  let displayColor: string;
-  if (verdict === "SAFE") {
-    displayLabel = "SAFE";
-    displayColor = "var(--safe)";
-  } else if (dealbreaker) {
-    displayLabel = "DANGEROUS";
-    displayColor = "var(--danger)";
-  } else if (verified > 0) {
-    displayLabel = "DANGEROUS";
-    displayColor = "var(--danger)";
-  } else if (observed > 0) {
-    displayLabel = "SUSPICIOUS";
-    displayColor = "var(--suspected)";
-  } else {
-    displayLabel = "REVIEW";
-    displayColor = "var(--text-muted)";
-  }
+  const displayLabel = verdict;
+  const displayColor =
+    verdict === "SAFE" ? "var(--safe)" :
+    verdict === "REVIEW REQUIRED" ? "var(--suspected)" :
+    verdict === "HIGH RISK" ? "var(--danger)" :
+    "var(--danger)";
 
   let statsText: string;
   if (dealbreaker) {
     statsText = `DEALBREAKER: ${dealbreaker.problem}`;
   } else if (verified > 0) {
-    statsText = `${verified} verified${rest > 0 ? ` · ${rest} flagged` : ""}`;
+    statsText = `${finalScore ?? 0}/100 · ${verified} verified${rest > 0 ? ` · ${rest} flagged` : ""}`;
   } else if (observed > 0) {
-    statsText = `${observed} observed · ${rest} unverified`;
+    statsText = `${finalScore ?? 0}/100 · ${observed} observed · ${rest} unverified`;
   } else if (findings.length > 0) {
-    statsText = `${findings.length} flagged · none verified`;
+    statsText = `${finalScore ?? 0}/100 · ${findings.length} flagged · none verified`;
   } else {
-    statsText = verdict === "SAFE" ? "No issues found" : "Analysis complete";
+    statsText = verdict === "SAFE" ? `${finalScore ?? 0}/100 · No issues found` : `${finalScore ?? 0}/100 · Analysis complete`;
   }
 
   return (

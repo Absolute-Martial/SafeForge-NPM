@@ -1,0 +1,21 @@
+{
+  "name": "@safeforge-npm/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "safenpm": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "tsx --test tests/unit/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "tsx": "^4",
+    "typescript": "^5"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -8,6 +8,10 @@ function hasRuntimeOverride(runtime?: AuditLlmOverride): boolean {
   return !!runtime && Object.keys(runtime).length > 0;
 }
 
+export function isLlmEnabled(runtime?: AuditLlmOverride): boolean {
+  return hasRuntimeOverride(runtime) || config.llmEnabled;
+}
+
 export function getModel(modelName: string, runtime?: AuditLlmOverride) {
   const runtimeModelName = runtime?.model ?? modelName;
 

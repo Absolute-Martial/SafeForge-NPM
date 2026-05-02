@@ -34,7 +34,7 @@ function readJson(filePath: string): Record<string, unknown> {
 }
 
 function createPackageTarball(packagePath: string, workDir: string): string {
-  const output = execFileSync("npm", ["pack", packagePath, "--pack-destination", workDir], {
+  const output = execFileSync("npm", ["pack", packagePath, "--ignore-scripts", "--pack-destination", workDir], {
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -46,10 +46,7 @@ function createPackageTarball(packagePath: string, workDir: string): string {
 }
 
 function countDepth(lockPath: string): number {
-  return Math.max(
-    0,
-    lockPath.split("/").filter((segment) => segment === "node_modules").length - 1,
-  );
+  return lockPath.split("/").filter((segment) => segment === "node_modules").length;
 }
 
 function leafPackageName(lockPath: string): string | null {
@@ -80,7 +77,7 @@ function collectDependencyNames(entry: LockPackageEntry): string[] {
   return [...names];
 }
 
-function fallbackReport(packageJson: Record<string, unknown>): DependencyGraphReport {
+function fallbackReport(packageJson: Record<string, unknown>, scanDepth: number): DependencyGraphReport {
   const packageName = typeof packageJson.name === "string" ? packageJson.name : "unknown";
   const packageVersion = typeof packageJson.version === "string" ? packageJson.version : null;
   const rootId = `${packageName}@${packageVersion ?? "unknown"}::root`;
@@ -91,6 +88,10 @@ function fallbackReport(packageJson: Record<string, unknown>): DependencyGraphRe
     nodeCount: 1,
     directCount: 0,
     maxDepth: 0,
+    maxObservedDepth: 0,
+    scanDepthApplied: scanDepth,
+    truncated: false,
+    truncatedNodeCount: 0,
     nodes: [
       DependencyGraphNode.parse({
         id: rootId,
@@ -148,6 +149,7 @@ function resolveChildPath(
 export function parseDependencyGraphFromLockfile(
   lockfile: LockfileV3,
   packageJson: Record<string, unknown>,
+  scanDepth: number,
 ): DependencyGraphReport | null {
   const packageName = typeof packageJson.name === "string" ? packageJson.name : "unknown";
   const packageVersion = typeof packageJson.version === "string" ? packageJson.version : null;
@@ -206,7 +208,7 @@ export function parseDependencyGraphFromLockfile(
     }
   }
 
-  const nodes = [...nodeByPath.values()].map((node) =>
+  const allNodes = [...nodeByPath.values()].map((node) =>
     DependencyGraphNode.parse({
       ...node,
       parents: [...(parentsById.get(node.id) ?? new Set<string>())],
@@ -214,17 +216,36 @@ export function parseDependencyGraphFromLockfile(
     }),
   );
 
+  const includedNodeIds = new Set(
+    allNodes.filter((node) => node.depth <= scanDepth).map((node) => node.id),
+  );
+  const nodes = allNodes
+    .filter((node) => node.depth <= scanDepth)
+    .map((node) =>
+      DependencyGraphNode.parse({
+        ...node,
+        parents: node.parents.filter((parent) => includedNodeIds.has(parent)),
+        direct: node.direct && scanDepth >= 1,
+      }),
+    );
+  const maxObservedDepth = allNodes.reduce((max, node) => Math.max(max, node.depth), 0);
+  const truncatedNodeCount = allNodes.length - nodes.length;
+
   return DependencyGraphReport.parse({
     packageName,
     packageVersion,
     nodeCount: nodes.length,
     directCount: nodes.filter((node) => node.direct).length,
     maxDepth: nodes.reduce((max, node) => Math.max(max, node.depth), 0),
+    maxObservedDepth,
+    scanDepthApplied: scanDepth,
+    truncated: truncatedNodeCount > 0,
+    truncatedNodeCount,
     nodes: nodes.sort((a, b) => a.depth - b.depth || a.name.localeCompare(b.name)),
   });
 }
 
-export async function buildDependencyGraph(packagePath: string): Promise<DependencyGraphPhaseResult> {
+export async function buildDependencyGraph(packagePath: string, scanDepth: number): Promise<DependencyGraphPhaseResult> {
   const packageJson = readJson(path.join(packagePath, "package.json"));
   const warnings: ScanWarning[] = [];
   const workDir = createRuntimeTempDir("safeforge-depgraph-");
@@ -264,16 +285,16 @@ export async function buildDependencyGraph(packagePath: string): Promise<Depende
     const lockPath = path.join(workDir, "package-lock.json");
     if (!fs.existsSync(lockPath)) {
       return {
-        report: fallbackReport(packageJson),
+        report: fallbackReport(packageJson, scanDepth),
         warnings,
       };
     }
 
     const lockfile = JSON.parse(fs.readFileSync(lockPath, "utf-8")) as LockfileV3;
-    const report = parseDependencyGraphFromLockfile(lockfile, packageJson);
+    const report = parseDependencyGraphFromLockfile(lockfile, packageJson, scanDepth);
     if (!report) {
       return {
-        report: fallbackReport(packageJson),
+        report: fallbackReport(packageJson, scanDepth),
         warnings: [
           ...warnings,
           {

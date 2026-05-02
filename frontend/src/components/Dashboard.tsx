@@ -1,13 +1,33 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { useAuditStore } from "../stores/auditStore";
-import type { AuditStartOptions } from "../lib/types";
+import type { AppSettings, AuditStartOptions, NodeVersion, SecurityMode, SettingsResponse } from "../lib/types";
 
-const PROVIDER_PRESETS = {
-  openai: { label: "OpenAI", providerName: "openai", baseUrl: "https://api.openai.com/v1" },
-  openrouter: { label: "OpenRouter", providerName: "openrouter", baseUrl: "https://openrouter.ai/api/v1" },
-  groq: { label: "Groq", providerName: "groq", baseUrl: "https://api.groq.com/openai/v1" },
-  custom: { label: "Custom", providerName: "custom", baseUrl: "" },
-} as const;
+const API_BASE = import.meta.env.DEV ? "/api" : "";
+
+const DEFAULT_SETTINGS: AppSettings = {
+  llmEnabled: false,
+  llmBackend: "openai_compatible",
+  llmBaseUrl: "https://api.openai.com/v1",
+  llmApiKey: "",
+  triageModel: "gpt-4.1-mini",
+  investigationModel: "gpt-4.1",
+  testGenModel: "gpt-4.1",
+  githubToken: "",
+  nvdApiKey: "",
+  defaultNodeVersions: ["22", "24"],
+  defaultScanDepth: 3,
+  defaultSecurityMode: "balanced",
+  cliBehaviorEnabled: true,
+  aiScenariosEnabled: false,
+  publishEnabled: true,
+  sandboxImage: "node:24-slim",
+  sandboxMemoryMb: 512,
+  sandboxCpus: 1,
+  sandboxNetwork: "none",
+  maxDockerExecTimeoutSec: 30,
+  runtimeRoot: "",
+  runtimeHostRoot: "",
+};
 
 function parsePackageInput(input: string): { packageName: string; version?: string } {
   const trimmed = input.trim();
@@ -33,283 +53,787 @@ export function Dashboard() {
   const isRunning = useAuditStore((s) => s.isRunning);
   const error = useAuditStore((s) => s.error);
 
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
+  const [configPath, setConfigPath] = useState("");
   const [input, setInput] = useState("");
-  const [providerPreset, setProviderPreset] = useState<keyof typeof PROVIDER_PRESETS>("openai");
-  const [baseUrl, setBaseUrl] = useState<string>(PROVIDER_PRESETS.openai.baseUrl);
-  const [model, setModel] = useState("gpt-4.1-mini");
-  const [apiKey, setApiKey] = useState("");
-  const [node20, setNode20] = useState(true);
-  const [node22, setNode22] = useState(true);
+  const [models, setModels] = useState<string[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [isLoadingSettings, setIsLoadingSettings] = useState(true);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [isLoadingModels, setIsLoadingModels] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const response = await fetch(`${API_BASE}/settings`);
+        if (!response.ok) {
+          throw new Error(`Settings request failed (${response.status})`);
+        }
+        const payload = await response.json() as SettingsResponse;
+        if (!active) return;
+        setSettings({
+          ...DEFAULT_SETTINGS,
+          ...payload.settings,
+          llmApiKey: payload.settings.llmApiKey ?? "",
+          githubToken: payload.settings.githubToken ?? "",
+          nvdApiKey: payload.settings.nvdApiKey ?? "",
+          runtimeRoot: payload.settings.runtimeRoot ?? "",
+          runtimeHostRoot: payload.settings.runtimeHostRoot ?? "",
+        });
+        setConfigPath(payload.configPath);
+        setLoadError(null);
+      } catch (fetchError) {
+        if (!active) return;
+        setLoadError(fetchError instanceof Error ? fetchError.message : "Failed to load settings");
+      } finally {
+        if (active) {
+          setIsLoadingSettings(false);
+        }
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const parsedInput = useMemo(() => parsePackageInput(input), [input]);
+  const selectedNodeVersions = settings.defaultNodeVersions;
+  const researchModeUnavailable = settings.defaultSecurityMode === "research" && !settings.llmEnabled;
+  const canAudit = parsedInput.packageName.length > 0 && selectedNodeVersions.length > 0 && !isRunning && !isSavingSettings && !researchModeUnavailable;
 
-  const scanOptions = useMemo<AuditStartOptions>(() => {
-    const preset = PROVIDER_PRESETS[providerPreset];
-    const llm = {
-      providerName: preset.providerName,
-      baseUrl: baseUrl.trim() || preset.baseUrl,
-      apiKey: apiKey.trim() || undefined,
-      model: model.trim() || undefined,
-    };
+  const scanOptions = useMemo<AuditStartOptions>(() => ({
+    sandbox: {
+      nodeVersions: settings.defaultNodeVersions,
+      cliBehaviorEnabled: settings.cliBehaviorEnabled,
+      aiScenariosEnabled: settings.aiScenariosEnabled,
+    },
+    publish: settings.publishEnabled,
+    scanDepth: settings.defaultScanDepth,
+    securityMode: settings.defaultSecurityMode,
+  }), [settings]);
 
-    return {
-      llm: llm.baseUrl || llm.apiKey || llm.model || llm.providerName ? llm : undefined,
-      sandbox: {
-        nodeVersions: [node20 ? "20" : null, node22 ? "22" : null].filter(Boolean) as Array<"20" | "22">,
-        cliBehaviorEnabled: true,
-        aiScenariosEnabled: false,
-      },
-    };
-  }, [apiKey, baseUrl, model, node20, node22, providerPreset]);
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!parsedInput.packageName || (!node20 && !node22)) return;
-    startAudit(parsedInput.packageName, parsedInput.version, scanOptions);
+  const updateSettings = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
+    setSettings((current) => ({ ...current, [key]: value }));
+    setSaveMessage(null);
   };
 
-  const applyPreset = (presetKey: keyof typeof PROVIDER_PRESETS) => {
-    setProviderPreset(presetKey);
-    setBaseUrl(PROVIDER_PRESETS[presetKey].baseUrl);
+  const handleNodeVersionToggle = (version: NodeVersion) => {
+    setSettings((current) => {
+      const exists = current.defaultNodeVersions.includes(version);
+      return {
+        ...current,
+        defaultNodeVersions: exists
+          ? current.defaultNodeVersions.filter((entry) => entry !== version)
+          : [...current.defaultNodeVersions, version].sort() as NodeVersion[],
+      };
+    });
+    setSaveMessage(null);
   };
+
+  const persistSettings = async () => {
+    setIsSavingSettings(true);
+    setLoadError(null);
+    setSaveMessage(null);
+    try {
+      const response = await fetch(`${API_BASE}/settings`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(settings),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error ?? `Settings save failed (${response.status})`);
+      }
+      const payload = await response.json() as SettingsResponse;
+      setSettings({
+        ...DEFAULT_SETTINGS,
+        ...payload.settings,
+        llmApiKey: payload.settings.llmApiKey ?? "",
+        githubToken: payload.settings.githubToken ?? "",
+        nvdApiKey: payload.settings.nvdApiKey ?? "",
+        runtimeRoot: payload.settings.runtimeRoot ?? "",
+        runtimeHostRoot: payload.settings.runtimeHostRoot ?? "",
+      });
+      setConfigPath(payload.configPath);
+      setSaveMessage("Saved to settings.local.json");
+      return true;
+    } catch (saveError) {
+      setLoadError(saveError instanceof Error ? saveError.message : "Failed to save settings");
+      return false;
+    } finally {
+      setIsSavingSettings(false);
+    }
+  };
+
+  const loadModels = async () => {
+    setIsLoadingModels(true);
+    setLoadError(null);
+    try {
+      const response = await fetch(`${API_BASE}/settings/models`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          backend: settings.llmBackend,
+          baseUrl: settings.llmBaseUrl,
+          apiKey: settings.llmApiKey || undefined,
+        }),
+      });
+      const payload = await response.json() as { models?: string[]; error?: string; warning?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? `Model discovery failed (${response.status})`);
+      }
+      setModels(payload.models ?? []);
+      setSaveMessage(payload.models?.length ? `Loaded ${payload.models.length} models` : (payload.warning ?? "No models returned"));
+    } catch (modelError) {
+      setLoadError(modelError instanceof Error ? modelError.message : "Failed to load models");
+    } finally {
+      setIsLoadingModels(false);
+    }
+  };
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!canAudit) return;
+    const saved = await persistSettings();
+    if (!saved) return;
+    await startAudit(parsedInput.packageName, parsedInput.version, scanOptions);
+  };
+
+  if (isLoadingSettings) {
+    return (
+      <div className="flex-1 flex items-center justify-center" style={{ padding: 24 }}>
+        <div style={{ fontFamily: "var(--font-mono)", color: "var(--text-dim)" }}>
+          Loading scanner settings...
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
-      className="flex-1 flex flex-col items-center justify-start gap-6"
-      style={{ padding: "48px 20px 80px" }}
+      className="flex-1"
+      style={{
+        padding: "28px 20px 40px",
+      }}
     >
-      <h2
+      <div
         style={{
-          fontFamily: "var(--font-heading)",
-          fontWeight: 700,
-          fontSize: "1.6rem",
-          letterSpacing: 0,
+          width: "min(1280px, 100%)",
+          margin: "0 auto",
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 360px), 1fr))",
+          gap: 18,
+          alignItems: "start",
         }}
       >
-        SafeForge NPM
-      </h2>
-
-      <p
-        style={{
-          color: "var(--text-dim)",
-          fontSize: "0.85rem",
-          fontFamily: "var(--font-mono)",
-          maxWidth: 540,
-          textAlign: "center",
-          lineHeight: 1.7,
-        }}
-      >
-        Audit an npm package before installation with recursive dependency analysis, provider-agnostic AI triage,
-        and CLI behavior monitoring across isolated Node sandboxes.
-      </p>
-
-      <form
-        onSubmit={handleSubmit}
-        className="flex flex-col gap-4"
-        style={{
-          width: "min(720px, 100%)",
-          background: "var(--bg-secondary)",
-          border: "1px solid var(--border-strong)",
-          borderRadius: "var(--radius)",
-          padding: 18,
-        }}
-      >
-        <div className="flex items-center gap-2" style={{ flexWrap: "wrap" }}>
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="e.g. eslint or @scope/pkg@1.2.3"
-            autoFocus
-            style={{
-              background: "var(--bg-primary)",
-              border: "1px solid var(--border-strong)",
-              borderRadius: "var(--radius)",
-              padding: "10px 16px",
-              fontFamily: "var(--font-mono)",
-              fontSize: "0.9rem",
-              color: "var(--text)",
-              flex: 1,
-              minWidth: 260,
-              outline: "none",
-            }}
-          />
-          <button
-            type="submit"
-            disabled={!parsedInput.packageName || isRunning || (!node20 && !node22)}
-            className="disabled:opacity-30 disabled:cursor-not-allowed"
-            style={{
-              padding: "10px 20px",
-              border: "none",
-              borderRadius: "var(--radius)",
-              background: "var(--accent)",
-              color: "#fff",
-              fontWeight: 600,
-              fontSize: "0.85rem",
-              cursor: "pointer",
-              letterSpacing: "0.02em",
-              whiteSpace: "nowrap",
-              fontFamily: "var(--font-mono)",
-            }}
-          >
-            {isRunning ? "Auditing..." : "Audit"}
-          </button>
-        </div>
-
-        <div
+        <section
           style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-            gap: 12,
+            background: "var(--bg-secondary)",
+            border: "1px solid var(--border-strong)",
+            borderRadius: "var(--radius)",
+            padding: 18,
+            display: "flex",
+            flexDirection: "column",
+            gap: 18,
           }}
         >
-          <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
-              Provider
-            </span>
-            <select
-              value={providerPreset}
-              onChange={(e) => applyPreset(e.target.value as keyof typeof PROVIDER_PRESETS)}
+          <div className="flex items-start justify-between gap-4" style={{ flexWrap: "wrap" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <h1
+                style={{
+                  fontFamily: "var(--font-heading)",
+                  fontSize: "1.5rem",
+                  fontWeight: 700,
+                  letterSpacing: 0,
+                }}
+              >
+                Settings
+              </h1>
+              <p
+                style={{
+                  color: "var(--text-dim)",
+                  fontFamily: "var(--font-mono)",
+                  fontSize: "0.77rem",
+                  lineHeight: 1.65,
+                  maxWidth: 620,
+                }}
+              >
+                SafeForge stores local engine configuration in <span style={{ color: "var(--text)" }}>{configPath || "settings.local.json"}</span>.
+                Keep LLM disabled for database and deterministic checks only, or enable an OpenAI-compatible provider for deeper reasoning.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-10" style={{ flexWrap: "wrap" }}>
+              <button
+                type="button"
+                onClick={() => void persistSettings()}
+                disabled={isSavingSettings}
+                style={primaryButtonStyle}
+              >
+                {isSavingSettings ? "Saving..." : "Save Settings"}
+              </button>
+            </div>
+          </div>
+
+          {(loadError || saveMessage || error) && (
+            <div
               style={{
-                background: "var(--bg-primary)",
-                border: "1px solid var(--border)",
                 borderRadius: "var(--radius-sm)",
+                border: `1px solid ${loadError || error ? "var(--danger)" : "var(--safe)"}`,
+                background: loadError || error ? "var(--danger-bg)" : "var(--safe-bg)",
+                color: loadError || error ? "var(--danger)" : "var(--safe)",
                 padding: "10px 12px",
-                color: "var(--text)",
+                fontFamily: "var(--font-mono)",
+                fontSize: "0.74rem",
               }}
             >
-              {Object.entries(PROVIDER_PRESETS).map(([key, preset]) => (
-                <option key={key} value={key}>{preset.label}</option>
-              ))}
-            </select>
-          </label>
+              {loadError ?? error ?? saveMessage}
+            </div>
+          )}
 
-          <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
-              Base URL
-            </span>
-            <input
-              type="url"
-              value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
-              placeholder="https://api.openai.com/v1"
-              style={{
-                background: "var(--bg-primary)",
-                border: "1px solid var(--border)",
-                borderRadius: "var(--radius-sm)",
-                padding: "10px 12px",
-                color: "var(--text)",
-                fontFamily: "var(--font-mono)",
-              }}
-            />
-          </label>
-
-          <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
-              Model
-            </span>
-            <input
-              type="text"
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              placeholder="gpt-4.1-mini"
-              style={{
-                background: "var(--bg-primary)",
-                border: "1px solid var(--border)",
-                borderRadius: "var(--radius-sm)",
-                padding: "10px 12px",
-                color: "var(--text)",
-                fontFamily: "var(--font-mono)",
-              }}
-            />
-          </label>
-
-          <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
-              API Key
-            </span>
-            <input
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder="Used only for this scan"
-              autoComplete="off"
-              style={{
-                background: "var(--bg-primary)",
-                border: "1px solid var(--border)",
-                borderRadius: "var(--radius-sm)",
-                padding: "10px 12px",
-                color: "var(--text)",
-                fontFamily: "var(--font-mono)",
-              }}
-            />
-          </label>
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            flexWrap: "wrap",
-            borderTop: "1px solid var(--border)",
-            paddingTop: 12,
-          }}
-        >
-          <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
-            Sandbox Node versions
-          </span>
-          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.82rem", color: "var(--text-dim)" }}>
-            <input type="checkbox" checked={node20} onChange={(e) => setNode20(e.target.checked)} />
-            Node 20
-          </label>
-          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.82rem", color: "var(--text-dim)" }}>
-            <input type="checkbox" checked={node22} onChange={(e) => setNode22(e.target.checked)} />
-            Node 22
-          </label>
-          <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginLeft: "auto" }}>
-            CLI behavior tests run with `--help`, `--version`, and no args.
-          </span>
-        </div>
-      </form>
-
-      {error && (
-        <div
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: "0.85rem",
-            color: "var(--danger)",
-            maxWidth: 640,
-            textAlign: "center",
-            background: "rgba(255,60,60,0.08)",
-            border: "1px solid var(--danger)",
-            borderRadius: "var(--radius)",
-            padding: "14px 20px",
-          }}
-        >
-          <p style={{ marginBottom: 8 }}>{error}</p>
-          <button
-            onClick={() => {
-              if (parsedInput.packageName && (node20 || node22)) {
-                startAudit(parsedInput.packageName, parsedInput.version, scanOptions);
-              }
-            }}
+          <div
             style={{
-              padding: "6px 16px",
-              border: "1px solid var(--danger)",
-              borderRadius: "var(--radius)",
-              background: "none",
-              color: "var(--danger)",
-              fontWeight: 600,
-              fontSize: "0.75rem",
-              cursor: "pointer",
-              fontFamily: "var(--font-mono)",
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))",
+              gap: 12,
             }}
           >
-            Retry
-          </button>
-        </div>
-      )}
+            <SettingToggle
+              label="Enable LLM reasoning"
+              detail="Turns on triage, investigation, test generation, and verification."
+              checked={settings.llmEnabled}
+              onChange={(value) => updateSettings("llmEnabled", value)}
+            />
+            <SettingToggle
+              label="CLI behavior sandbox"
+              detail="Runs package CLI commands in isolated Docker sandboxes."
+              checked={settings.cliBehaviorEnabled}
+              onChange={(value) => updateSettings("cliBehaviorEnabled", value)}
+            />
+            <SettingToggle
+              label="Auto publish"
+              detail="Publishes fresh scan results when publish infrastructure is configured."
+              checked={settings.publishEnabled}
+              onChange={(value) => updateSettings("publishEnabled", value)}
+            />
+          </div>
+
+          <SectionTitle title="Scan Policy" detail="These defaults are applied to web scans and CLI requests unless overridden." />
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+              gap: 12,
+              alignItems: "start",
+            }}
+          >
+            <Field label={`Scan depth (${settings.defaultScanDepth})`}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <input
+                  type="range"
+                  min={0}
+                  max={5}
+                  step={1}
+                  value={settings.defaultScanDepth}
+                  onChange={(event) => updateSettings("defaultScanDepth", Number(event.target.value))}
+                />
+                <span style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)", fontSize: "0.68rem", lineHeight: 1.5 }}>
+                  {scanDepthLabel(settings.defaultScanDepth)}
+                </span>
+              </div>
+            </Field>
+
+            <Field label="Security mode">
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {(["strict", "balanced", "research"] as SecurityMode[]).map((mode) => {
+                  const selected = settings.defaultSecurityMode === mode;
+                  const disabled = mode === "research" && !settings.llmEnabled;
+                  return (
+                    <button
+                      key={mode}
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => updateSettings("defaultSecurityMode", mode)}
+                      style={{
+                        ...segmentedButtonStyle,
+                        borderColor: selected ? "var(--accent)" : "var(--border)",
+                        background: selected ? "var(--accent-bg)" : "transparent",
+                        color: disabled ? "var(--text-muted)" : "var(--text)",
+                        opacity: disabled ? 0.55 : 1,
+                      }}
+                    >
+                      {modeLabel(mode)}
+                    </button>
+                  );
+                })}
+              </div>
+            </Field>
+          </div>
+
+          <SectionTitle title="LLM Provider" detail="Server-side defaults for OpenAI-compatible reasoning." />
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+              gap: 12,
+            }}
+          >
+            <Field label="Backend">
+              <select
+                value={settings.llmBackend}
+                onChange={(event) => updateSettings("llmBackend", event.target.value as AppSettings["llmBackend"])}
+                style={inputStyle}
+              >
+                <option value="openai_compatible">OpenAI compatible</option>
+                <option value="anthropic">Anthropic</option>
+              </select>
+            </Field>
+
+            <Field label="Base URL">
+              <input
+                type="url"
+                value={settings.llmBaseUrl}
+                onChange={(event) => updateSettings("llmBaseUrl", event.target.value)}
+                placeholder="https://api.openai.com/v1"
+                style={inputStyle}
+                disabled={!settings.llmEnabled}
+              />
+            </Field>
+
+            <Field label="API key">
+              <input
+                type="password"
+                value={settings.llmApiKey ?? ""}
+                onChange={(event) => updateSettings("llmApiKey", event.target.value)}
+                placeholder="sk-..."
+                autoComplete="off"
+                style={inputStyle}
+                disabled={!settings.llmEnabled}
+              />
+            </Field>
+
+            <Field label="Load model list">
+              <button
+                type="button"
+                onClick={() => void loadModels()}
+                disabled={!settings.llmEnabled || settings.llmBackend !== "openai_compatible" || isLoadingModels}
+                style={secondaryButtonStyle}
+              >
+                {isLoadingModels ? "Loading..." : "Fetch /models"}
+              </button>
+            </Field>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+              gap: 12,
+            }}
+          >
+            <ModelField
+              label="Triage model"
+              value={settings.triageModel}
+              models={models}
+              disabled={!settings.llmEnabled}
+              onChange={(value) => updateSettings("triageModel", value)}
+            />
+            <ModelField
+              label="Investigation model"
+              value={settings.investigationModel}
+              models={models}
+              disabled={!settings.llmEnabled}
+              onChange={(value) => updateSettings("investigationModel", value)}
+            />
+            <ModelField
+              label="Test generation model"
+              value={settings.testGenModel}
+              models={models}
+              disabled={!settings.llmEnabled}
+              onChange={(value) => updateSettings("testGenModel", value)}
+            />
+          </div>
+
+          <SectionTitle title="Vulnerability Intelligence" detail="Optional enrichment tokens for advisory scanning." />
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+              gap: 12,
+            }}
+          >
+            <Field label="GitHub advisory token">
+              <input
+                type="password"
+                value={settings.githubToken ?? ""}
+                onChange={(event) => updateSettings("githubToken", event.target.value)}
+                placeholder="ghp_..."
+                autoComplete="off"
+                style={inputStyle}
+              />
+            </Field>
+            <Field label="NVD API key">
+              <input
+                type="password"
+                value={settings.nvdApiKey ?? ""}
+                onChange={(event) => updateSettings("nvdApiKey", event.target.value)}
+                placeholder="NVD key"
+                autoComplete="off"
+                style={inputStyle}
+              />
+            </Field>
+          </div>
+
+          <SectionTitle title="Sandbox Defaults" detail="Native SafeForge CLI behavior testing settings." />
+          <div className="flex items-center gap-10" style={{ flexWrap: "wrap" }}>
+            <CheckboxChip
+              label="Node 22"
+              checked={settings.defaultNodeVersions.includes("22")}
+              onChange={() => handleNodeVersionToggle("22")}
+            />
+            <CheckboxChip
+              label="Node 24"
+              checked={settings.defaultNodeVersions.includes("24")}
+              onChange={() => handleNodeVersionToggle("24")}
+            />
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+              gap: 12,
+            }}
+          >
+            <Field label="Sandbox image">
+              <input
+                type="text"
+                value={settings.sandboxImage}
+                onChange={(event) => updateSettings("sandboxImage", event.target.value)}
+                style={inputStyle}
+              />
+            </Field>
+            <Field label="Sandbox memory (MB)">
+              <input
+                type="number"
+                min={64}
+                max={4096}
+                value={settings.sandboxMemoryMb}
+                onChange={(event) => updateSettings("sandboxMemoryMb", Number(event.target.value))}
+                style={inputStyle}
+              />
+            </Field>
+            <Field label="Sandbox CPUs">
+              <input
+                type="number"
+                min={0.25}
+                max={4}
+                step={0.25}
+                value={settings.sandboxCpus}
+                onChange={(event) => updateSettings("sandboxCpus", Number(event.target.value))}
+                style={inputStyle}
+              />
+            </Field>
+            <Field label="Sandbox network">
+              <input
+                type="text"
+                value={settings.sandboxNetwork}
+                onChange={(event) => updateSettings("sandboxNetwork", event.target.value)}
+                style={inputStyle}
+              />
+            </Field>
+            <Field label="Docker exec timeout (sec)">
+              <input
+                type="number"
+                min={5}
+                max={300}
+                value={settings.maxDockerExecTimeoutSec}
+                onChange={(event) => updateSettings("maxDockerExecTimeoutSec", Number(event.target.value))}
+                style={inputStyle}
+              />
+            </Field>
+            <Field label="Runtime root">
+              <input
+                type="text"
+                value={settings.runtimeRoot ?? ""}
+                onChange={(event) => updateSettings("runtimeRoot", event.target.value)}
+                placeholder="/tmp/safeforge-npm-runtime"
+                style={inputStyle}
+              />
+            </Field>
+          </div>
+        </section>
+
+        <aside
+          style={{
+            background: "var(--bg-secondary)",
+            border: "1px solid var(--border-strong)",
+            borderRadius: "var(--radius)",
+            padding: 18,
+            display: "flex",
+            flexDirection: "column",
+            gap: 16,
+            position: "sticky",
+            top: 20,
+          }}
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <h2
+              style={{
+                fontFamily: "var(--font-heading)",
+                fontSize: "1.1rem",
+                fontWeight: 700,
+                letterSpacing: 0,
+              }}
+            >
+              Start Scan
+            </h2>
+            <p style={{ color: "var(--text-dim)", fontFamily: "var(--font-mono)", fontSize: "0.74rem", lineHeight: 1.65 }}>
+              {settings.llmEnabled
+                ? "Deep analysis is enabled. The engine will use saved provider settings plus deterministic checks."
+                : "LLM reasoning is off. SafeForge will return database and deterministic scan results only."}
+            </p>
+            {researchModeUnavailable && (
+              <p style={{ color: "var(--danger)", fontFamily: "var(--font-mono)", fontSize: "0.72rem", lineHeight: 1.55 }}>
+                Research mode requires LLM configuration. Enable LLM reasoning or switch back to Strict or Balanced.
+              </p>
+            )}
+          </div>
+
+          <form onSubmit={handleSubmit} className="flex flex-col gap-12">
+            <Field label="Package spec">
+              <input
+                type="text"
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                placeholder="event-stream@3.3.6"
+                autoFocus
+                style={inputStyle}
+              />
+            </Field>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                gap: 10,
+              }}
+            >
+              <MetricCard label="LLM mode" value={settings.llmEnabled ? "Enabled" : "Disabled"} tone={settings.llmEnabled ? "accent" : "neutral"} />
+              <MetricCard label="CLI sandbox" value={settings.cliBehaviorEnabled ? "On" : "Off"} tone={settings.cliBehaviorEnabled ? "accent" : "neutral"} />
+              <MetricCard label="Node targets" value={settings.defaultNodeVersions.join(", ")} tone="neutral" />
+              <MetricCard label="Depth" value={String(settings.defaultScanDepth)} tone="neutral" />
+              <MetricCard label="Security mode" value={modeLabel(settings.defaultSecurityMode)} tone={settings.defaultSecurityMode === "balanced" ? "neutral" : "accent"} />
+              <MetricCard label="Publish" value={settings.publishEnabled ? "Auto" : "Off"} tone="neutral" />
+            </div>
+
+            <button type="submit" disabled={!canAudit} style={primaryButtonStyle}>
+              {isRunning ? "Auditing..." : "Save And Audit"}
+            </button>
+          </form>
+        </aside>
+      </div>
     </div>
   );
 }
+
+function SectionTitle({ title, detail }: { title: string; detail: string }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <h3
+        style={{
+          fontFamily: "var(--font-heading)",
+          fontWeight: 700,
+          fontSize: "0.98rem",
+          letterSpacing: 0,
+        }}
+      >
+        {title}
+      </h3>
+      <p style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)", fontSize: "0.7rem", lineHeight: 1.6 }}>
+        {detail}
+      </p>
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+        {label}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+function SettingToggle({
+  label,
+  detail,
+  checked,
+  onChange,
+}: {
+  label: string;
+  detail: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label
+      style={{
+        display: "flex",
+        alignItems: "flex-start",
+        gap: 10,
+        padding: 12,
+        border: "1px solid var(--border)",
+        borderRadius: "var(--radius-sm)",
+        background: "var(--bg-primary, transparent)",
+        cursor: "pointer",
+      }}
+    >
+      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <span style={{ fontWeight: 600, fontSize: "0.84rem" }}>{label}</span>
+        <span style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)", fontSize: "0.68rem", lineHeight: 1.5 }}>
+          {detail}
+        </span>
+      </div>
+    </label>
+  );
+}
+
+function CheckboxChip({ label, checked, onChange }: { label: string; checked: boolean; onChange: () => void }) {
+  return (
+    <label
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "8px 12px",
+        borderRadius: "999px",
+        border: `1px solid ${checked ? "var(--accent)" : "var(--border)"}`,
+        background: checked ? "var(--accent-bg)" : "transparent",
+        cursor: "pointer",
+        fontFamily: "var(--font-mono)",
+        fontSize: "0.78rem",
+      }}
+    >
+      <input type="checkbox" checked={checked} onChange={onChange} />
+      {label}
+    </label>
+  );
+}
+
+function ModelField({
+  label,
+  value,
+  models,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  models: string[];
+  disabled: boolean;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <Field label={label}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <select value={models.includes(value) ? value : "__custom__"} onChange={(event) => {
+          if (event.target.value !== "__custom__") {
+            onChange(event.target.value);
+          }
+        }} disabled={disabled} style={inputStyle}>
+          {models.length === 0 && <option value="__custom__">Custom model</option>}
+          {models.map((model) => (
+            <option key={model} value={model}>{model}</option>
+          ))}
+          <option value="__custom__">Custom model</option>
+        </select>
+        <input
+          type="text"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder="Enter model id"
+          disabled={disabled}
+          style={inputStyle}
+        />
+      </div>
+    </Field>
+  );
+}
+
+function MetricCard({ label, value, tone }: { label: string; value: string; tone: "accent" | "neutral" }) {
+  return (
+    <div
+      style={{
+        border: "1px solid var(--border)",
+        borderRadius: "var(--radius-sm)",
+        padding: "10px 12px",
+        background: tone === "accent" ? "var(--accent-bg)" : "transparent",
+        minHeight: 72,
+      }}
+    >
+      <div style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)", fontSize: "0.68rem", marginBottom: 8 }}>
+        {label}
+      </div>
+      <div style={{ fontFamily: "var(--font-heading)", fontSize: "0.98rem", fontWeight: 700 }}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function scanDepthLabel(depth: number) {
+  if (depth === 0) return "0 = root package only";
+  if (depth === 1) return "1 = direct dependencies only";
+  return `${depth} = progressively deeper transitive scanning`;
+}
+
+function modeLabel(mode: SecurityMode) {
+  return mode === "strict" ? "Strict" : mode === "balanced" ? "Balanced" : "Research";
+}
+
+const inputStyle: CSSProperties = {
+  background: "var(--bg)",
+  border: "1px solid var(--border)",
+  borderRadius: "var(--radius-sm)",
+  padding: "10px 12px",
+  color: "var(--text)",
+  fontFamily: "var(--font-mono)",
+  width: "100%",
+};
+
+const primaryButtonStyle: CSSProperties = {
+  padding: "10px 16px",
+  border: "none",
+  borderRadius: "var(--radius)",
+  background: "var(--accent)",
+  color: "#fff",
+  fontWeight: 700,
+  fontSize: "0.8rem",
+  cursor: "pointer",
+  fontFamily: "var(--font-mono)",
+};
+
+const secondaryButtonStyle: CSSProperties = {
+  ...primaryButtonStyle,
+  background: "transparent",
+  color: "var(--text)",
+  border: "1px solid var(--border)",
+};
+
+const segmentedButtonStyle: CSSProperties = {
+  padding: "10px 12px",
+  borderRadius: "var(--radius-sm)",
+  border: "1px solid var(--border)",
+  background: "transparent",
+  cursor: "pointer",
+  fontFamily: "var(--font-mono)",
+  fontSize: "0.74rem",
+};

@@ -18,7 +18,7 @@ import {
 
 test("enum schemas accept documented values", () => {
   assert.equal(VerdictEnum.parse("SAFE"), "SAFE");
-  assert.equal(VerdictEnum.parse("DANGEROUS"), "DANGEROUS");
+  assert.equal(VerdictEnum.parse("BLOCK"), "BLOCK");
   assert.equal(CapabilityEnum.parse("ENV_VARS"), "ENV_VARS");
   assert.equal(CapabilityEnum.parse("NETWORK"), "NETWORK");
   assert.equal(Confidence.parse("CONFIRMED"), "CONFIRMED");
@@ -119,6 +119,8 @@ test("AuditReport defaults nullable and array fields", () => {
   });
 
   assert.equal(report.verdict, "SAFE");
+  assert.equal(report.finalScore, 0);
+  assert.equal(report.securityModeApplied, "balanced");
   assert.deepEqual(report.capabilities, []);
   assert.deepEqual(report.proofs, []);
   assert.equal(report.triage, null);
@@ -128,7 +130,11 @@ test("AuditReport defaults nullable and array fields", () => {
 
 test("AuditReport accepts a populated report tree", () => {
   const report = AuditReport.parse({
-    verdict: "DANGEROUS",
+    verdict: "HIGH RISK",
+    finalScore: 68,
+    recommendedAction: "Review before install",
+    scanDepthApplied: 3,
+    securityModeApplied: "balanced",
     capabilities: ["ENV_VARS", "NETWORK"],
     proofs: [
       {
@@ -163,7 +169,8 @@ test("AuditReport accepts a populated report tree", () => {
     ],
   });
 
-  assert.equal(report.verdict, "DANGEROUS");
+  assert.equal(report.verdict, "HIGH RISK");
+  assert.equal(report.finalScore, 68);
   assert.deepEqual(report.capabilities, ["ENV_VARS", "NETWORK"]);
   assert.equal(report.proofs.length, 1);
   assert.equal(report.findings[0]?.confidence, "CONFIRMED");

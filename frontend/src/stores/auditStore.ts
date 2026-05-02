@@ -18,6 +18,7 @@ import type {
   AdvisorySummary,
   ScanWarning,
   AuditReport,
+  Verdict,
 } from "../lib/types";
 import { PHASE_ORDER, PHASE_LABELS } from "../lib/types";
 const API_BASE = import.meta.env.DEV ? "/api" : "";
@@ -52,7 +53,9 @@ interface AuditState {
   findings: Finding[];
 
   // Verdict
-  verdict: "SAFE" | "DANGEROUS" | null;
+  verdict: Verdict | null;
+  finalScore: number | null;
+  recommendedAction: string | null;
   capabilities: string[];
   proofCount: number;
   proofs: Proof[];
@@ -99,6 +102,8 @@ const initialState = {
   agentSteps: [],
   findings: [],
   verdict: null,
+  finalScore: null,
+  recommendedAction: null,
   capabilities: [],
   proofCount: 0,
   proofs: [],
@@ -154,6 +159,7 @@ function connectSSE(
     "verify_started", "verify_test_result",
     "cli_behavior_started", "cli_command_result",
     "dependency_graph_ready", "advisory_scan_started", "advisory_match", "advisory_summary",
+    "publish_complete", "publish_failed", "audit_complete",
     "verdict_reached", "audit_error",
   ] as const;
   for (const type of eventTypes) {
@@ -197,6 +203,9 @@ export const useAuditStore = create<AuditState>((set, get) => ({
           ...(version && { version }),
           ...(options?.llm ? { llm: options.llm } : {}),
           ...(options?.sandbox ? { sandbox: options.sandbox } : {}),
+          ...(typeof options?.publish === "boolean" ? { publish: options.publish } : {}),
+          ...(typeof options?.scanDepth === "number" ? { scanDepth: options.scanDepth } : {}),
+          ...(options?.securityMode ? { securityMode: options.securityMode } : {}),
         }),
       });
     } catch {
@@ -477,11 +486,14 @@ export const useAuditStore = create<AuditState>((set, get) => ({
       }
 
       case "dependency_graph_ready": {
+        const truncationNote = event.graph.truncated
+          ? `, truncated at depth ${event.graph.scanDepthApplied} (${event.graph.truncatedNodeCount} deeper package${event.graph.truncatedNodeCount === 1 ? "" : "s"} hidden)`
+          : "";
         set({
           dependencyGraph: event.graph,
           pipelineLog: [...state.pipelineLog, {
             kind: "info" as const,
-            text: `Dependency graph ready: ${event.graph.nodeCount} packages, ${event.graph.directCount} direct, depth ${event.graph.maxDepth}`,
+            text: `Dependency graph ready: ${event.graph.nodeCount} packages, ${event.graph.directCount} direct, depth ${event.graph.maxDepth}${truncationNote}`,
             timestamp: event.timestamp,
           }],
         });
@@ -592,6 +604,9 @@ export const useAuditStore = create<AuditState>((set, get) => ({
               if (report) {
                 const hydrated = report as AuditReport;
                 set({
+                  verdict: hydrated.verdict ?? state.verdict,
+                  finalScore: hydrated.finalScore ?? state.finalScore,
+                  recommendedAction: hydrated.recommendedAction ?? state.recommendedAction,
                   proofs: hydrated.proofs ?? [],
                   findings: hydrated.findings ?? state.findings,
                   capabilities: hydrated.capabilities ?? state.capabilities,
@@ -612,6 +627,11 @@ export const useAuditStore = create<AuditState>((set, get) => ({
         set({ isRunning: false, error: event.error ?? "Audit failed" });
         break;
       }
+
+      case "publish_complete":
+      case "publish_failed":
+      case "audit_complete":
+        break;
     }
   },
 

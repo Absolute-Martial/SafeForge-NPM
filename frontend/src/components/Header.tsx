@@ -10,9 +10,11 @@ export function Header() {
   const hasAudit = isRunning || verdict;
 
   const statusColor = verdict
-    ? verdict === "DANGEROUS"
-      ? "var(--danger)"
-      : "var(--safe)"
+    ? verdict === "SAFE"
+      ? "var(--safe)"
+      : verdict === "REVIEW REQUIRED"
+        ? "var(--suspected)"
+        : "var(--danger)"
     : "var(--investigating)";
 
   const goHome = () => {
