@@ -110,6 +110,9 @@ test("buildJsonScanResult returns the public machine-readable scan shape", () =>
       advisories: [],
       findings: [],
       capabilities: [],
+      reasoningStageSummaries: [{ stage: "threat_context", summary: "Looks harmless", highlights: [] }],
+      familyAnalyses: [],
+      evidenceGraph: { entrypoints: [], nodes: [], edges: [] },
     },
     publishResult: { status: "skipped" },
   });
@@ -117,4 +120,5 @@ test("buildJsonScanResult returns the public machine-readable scan shape", () =>
   assert.equal(result.packageName, "axios");
   assert.equal(result.score, 18);
   assert.equal(result.verdict, "SAFE");
+  assert.equal(result.reasoningStageSummaries?.[0]?.stage, "threat_context");
 });

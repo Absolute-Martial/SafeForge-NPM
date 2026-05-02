@@ -37,6 +37,8 @@ export interface AgentToolCall extends AuditEvent { type: "agent_tool_call"; too
 export interface AgentToolResult extends AuditEvent { type: "agent_tool_result"; tool: string; resultPreview: string; step: number; injectionDetected: boolean }
 export interface AgentReasoning extends AuditEvent { type: "agent_reasoning"; text: string; step: number }
 export interface FindingDiscovered extends AuditEvent { type: "finding_discovered"; finding: Finding }
+export interface InvestigationStageStarted extends AuditEvent { type: "investigation_stage_started"; stage: string; family?: string; entrypointIds?: string[] }
+export interface InvestigationStageCompleted extends AuditEvent { type: "investigation_stage_completed"; stage: string; summary: string; family?: string; entrypointIds?: string[]; findingCount?: number; entrypointCount?: number }
 export interface VerdictReached extends AuditEvent { type: "verdict_reached"; verdict: string; capabilities: string[]; proofCount: number }
 export interface AgentThinking extends AuditEvent { type: "agent_thinking"; step: number }
 export interface TriageProgress extends AuditEvent { type: "triage_progress"; current: number; total: number; file: string }

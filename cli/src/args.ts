@@ -231,6 +231,9 @@ export function buildJsonScanResult(input: {
     advisories: JsonScanResult["advisories"];
     findings: JsonScanResult["findings"];
     capabilities: string[];
+    reasoningStageSummaries?: JsonScanResult["reasoningStageSummaries"];
+    familyAnalyses?: JsonScanResult["familyAnalyses"];
+    evidenceGraph?: JsonScanResult["evidenceGraph"];
   };
   publishResult: JsonScanResult["publishResult"];
 }): JsonScanResult {
@@ -244,6 +247,9 @@ export function buildJsonScanResult(input: {
     advisories: input.report.advisories,
     findings: input.report.findings,
     capabilities: input.report.capabilities,
+    reasoningStageSummaries: input.report.reasoningStageSummaries,
+    familyAnalyses: input.report.familyAnalyses,
+    evidenceGraph: input.report.evidenceGraph,
     publishResult: input.publishResult,
   };
 }

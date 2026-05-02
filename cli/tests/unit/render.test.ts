@@ -33,3 +33,17 @@ test("describeEvent suppresses low-risk cli command noise", () => {
 
   assert.equal(line, null);
 });
+
+test("describeEvent formats staged investigation updates", () => {
+  const line = describeEvent(
+    {
+      type: "investigation_stage_completed",
+      stage: "call_chain_expansion",
+      family: "network_exfiltration",
+      summary: "Observed outbound POST after env access",
+    },
+    true,
+  );
+
+  assert.equal(line, "> network exfiltration: Observed outbound POST after env access");
+});

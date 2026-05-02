@@ -28,7 +28,12 @@ export function readFileImpl(packagePath: string, relPath: string): string {
   if (stat.size > MAX_FILE_READ) return `ERROR: file too large (${stat.size} bytes, max ${MAX_FILE_READ})`;
 
   try {
-    return fs.readFileSync(abs, "utf-8");
+    const content = fs.readFileSync(abs, "utf-8");
+    const numbered = content
+      .split("\n")
+      .map((line, index) => `${String(index + 1).padStart(4, " ")} | ${line}`)
+      .join("\n");
+    return `@@FILE:${relPath}\n${numbered}`;
   } catch (err) {
     return `ERROR: ${err instanceof Error ? err.message : String(err)}`;
   }
@@ -59,7 +64,7 @@ export function listFilesImpl(packagePath: string): string {
   }
 
   walk(packagePath);
-  return JSON.stringify(entries, null, 2);
+  return JSON.stringify({ files: entries }, null, 2);
 }
 
 export function searchFilesImpl(packagePath: string, pattern: string): string {
@@ -105,7 +110,7 @@ export function searchFilesImpl(packagePath: string, pattern: string): string {
             .slice(start, end)
             .map((l, j) => `  ${j + start === i ? ">" : " "} ${j + start + 1}: ${l}`)
             .join("\n");
-          results.push(`[${rel}:${i + 1}]\n${snippet}`);
+          results.push(`@@MATCH:${rel}:${i + 1}\n${snippet}`);
 
           if (results.length >= MAX_SEARCH_RESULTS) {
             results.push(`... truncated at ${MAX_SEARCH_RESULTS} results`);

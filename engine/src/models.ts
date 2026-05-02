@@ -45,6 +45,75 @@ export type CapabilityEnum = z.infer<typeof CapabilityEnum>;
 export const Confidence = z.enum(["SUSPECTED", "LIKELY", "CONFIRMED"]);
 export type Confidence = z.infer<typeof Confidence>;
 
+export const InvestigationStageEnum = z.enum([
+  "threat_context",
+  "entrypoint_prioritization",
+  "call_chain_expansion",
+  "evidence_extraction",
+]);
+export type InvestigationStageEnum = z.infer<typeof InvestigationStageEnum>;
+
+export const BehaviorFamilyEnum = z.enum([
+  "lifecycle_abuse",
+  "credential_theft",
+  "network_exfiltration",
+  "shell_execution",
+  "persistence_downloader",
+  "obfuscation_staged_payloads",
+  "npm_token_abuse",
+  "cicd_secret_harvesting",
+]);
+export type BehaviorFamilyEnum = z.infer<typeof BehaviorFamilyEnum>;
+
+export const EntrypointTypeEnum = z.enum([
+  "lifecycle",
+  "cli",
+  "main",
+  "exports",
+  "script_reference",
+]);
+export type EntrypointTypeEnum = z.infer<typeof EntrypointTypeEnum>;
+
+export const EvidenceProofTypeEnum = z.enum(["static", "observed", "verified"]);
+export type EvidenceProofTypeEnum = z.infer<typeof EvidenceProofTypeEnum>;
+
+export const EvidenceNodeKindEnum = z.enum([
+  "entrypoint",
+  "intermediate",
+  "sink",
+  "decoded_payload",
+  "trace_event",
+]);
+export type EvidenceNodeKindEnum = z.infer<typeof EvidenceNodeKindEnum>;
+
+export const EvidenceEdgeKindEnum = z.enum([
+  "imports",
+  "calls",
+  "reads_env",
+  "reads_config",
+  "spawns_process",
+  "writes_fs",
+  "makes_network_request",
+  "evaluates_code",
+  "decodes_payload",
+  "triggers_runtime_event",
+]);
+export type EvidenceEdgeKindEnum = z.infer<typeof EvidenceEdgeKindEnum>;
+
+export const SinkKindEnum = z.enum([
+  "child_process",
+  "filesystem",
+  "network",
+  "dns",
+  "eval",
+  "dynamic_require",
+  "obfuscated_loader",
+  "env_access",
+  "config_access",
+  "unknown",
+]);
+export type SinkKindEnum = z.infer<typeof SinkKindEnum>;
+
 export const ProofKind = z.enum([
   "STRUCTURAL",
   "AI_STATIC",
@@ -100,6 +169,64 @@ export type FileVerdict = z.infer<typeof FileVerdict>;
 // Phase 1b: Investigation
 // ---------------------------------------------------------------------------
 
+export const ReasoningStageSummary = z.object({
+  stage: InvestigationStageEnum,
+  summary: z.string(),
+  highlights: z.array(z.string()).default([]),
+});
+export type ReasoningStageSummary = z.infer<typeof ReasoningStageSummary>;
+
+export const PrioritizedEntrypoint = z.object({
+  id: z.string(),
+  type: EntrypointTypeEnum,
+  label: z.string(),
+  file: z.string().default(""),
+  trigger: z.string().default(""),
+  reason: z.string(),
+  priority: z.number().int().min(1).max(10).default(5),
+  scriptName: z.string().nullable().default(null),
+  commandName: z.string().nullable().default(null),
+});
+export type PrioritizedEntrypoint = z.infer<typeof PrioritizedEntrypoint>;
+
+export const FamilyAnalysis = z.object({
+  family: BehaviorFamilyEnum,
+  selected: z.boolean().default(true),
+  rationale: z.string().default(""),
+  summary: z.string().default(""),
+  entrypointIds: z.array(z.string()).default([]),
+  sinkKinds: z.array(SinkKindEnum).default([]),
+  observedSignals: z.array(z.string()).default([]),
+});
+export type FamilyAnalysis = z.infer<typeof FamilyAnalysis>;
+
+export const EvidenceGraphNode = z.object({
+  id: z.string(),
+  kind: EvidenceNodeKindEnum,
+  label: z.string(),
+  fileLine: z.string().default(""),
+  detail: z.string().default(""),
+  entrypointId: z.string().nullable().default(null),
+  sinkKind: SinkKindEnum.nullable().default(null),
+});
+export type EvidenceGraphNode = z.infer<typeof EvidenceGraphNode>;
+
+export const EvidenceGraphEdge = z.object({
+  from: z.string(),
+  to: z.string(),
+  relation: EvidenceEdgeKindEnum,
+  detail: z.string().default(""),
+  confidenceScore: z.number().min(0).max(10).default(5),
+});
+export type EvidenceGraphEdge = z.infer<typeof EvidenceGraphEdge>;
+
+export const EvidenceGraph = z.object({
+  entrypoints: z.array(PrioritizedEntrypoint).default([]),
+  nodes: z.array(EvidenceGraphNode).default([]),
+  edges: z.array(EvidenceGraphEdge).default([]),
+});
+export type EvidenceGraph = z.infer<typeof EvidenceGraph>;
+
 export const Finding = z.object({
   capability: z.string().describe("CapabilityEnum value, e.g. 'NETWORK'"),
   confidence: Confidence,
@@ -108,6 +235,10 @@ export const Finding = z.object({
   problem: z.string().describe("Human-readable description of the threat"),
   evidence: z.string().describe("Concrete data or observation"),
   reproductionStrategy: z.string().default("").describe("How to prove this in a reproducible test"),
+  entrypointId: z.string().nullable().default(null),
+  sinkKind: SinkKindEnum.nullable().default(null),
+  proofType: EvidenceProofTypeEnum.default("static"),
+  evidenceNodeIds: z.array(z.string()).default([]),
 });
 export type Finding = z.infer<typeof Finding>;
 
@@ -120,10 +251,26 @@ export const InvestigationInput = z.object({
   flags: z.array(z.string()).default([]),
   staticCaps: z.array(z.string()).default([]),
   staticProofSummaries: z.array(z.string()).default([]),
+  inventoryScripts: z.record(z.string()).default({}),
+  cliCommands: z.array(z.object({
+    name: z.string(),
+    entry: z.string(),
+  })).default([]),
+  mainEntrypoint: z.string().nullable().default(null),
+  exportEntrypoints: z.array(z.string()).default([]),
+  scriptReferencedFiles: z.array(z.string()).default([]),
 });
 export type InvestigationInput = z.infer<typeof InvestigationInput>;
 
 export const InvestigationOutput = z.object({
+  stageSummaries: z.array(ReasoningStageSummary).default([]),
+  prioritizedEntrypoints: z.array(PrioritizedEntrypoint).default([]),
+  familyAnalyses: z.array(FamilyAnalysis).default([]),
+  evidenceGraph: EvidenceGraph.default({
+    entrypoints: [],
+    nodes: [],
+    edges: [],
+  }),
   findings: z.array(Finding).default([]),
   summary: z.string().default(""),
 });
@@ -277,6 +424,10 @@ export const Proof = z.object({
   fileLine: z.string(),
   problem: z.string(),
   evidence: z.string(),
+  entrypointId: z.string().nullable().default(null),
+  sinkKind: SinkKindEnum.nullable().default(null),
+  proofType: EvidenceProofTypeEnum.default("static"),
+  evidenceNodeIds: z.array(z.string()).default([]),
 
   kind: ProofKind.default("STRUCTURAL"),
   contentHash: z.string().nullable().default(null),
@@ -405,6 +556,14 @@ export const AuditReport = z.object({
   scanWarnings: z.array(ScanWarning).default([]),
   cliBehavior: CliBehaviorReport.nullable().default(null),
   findings: z.array(Finding).default([]),
+  prioritizedEntrypoints: z.array(PrioritizedEntrypoint).default([]),
+  reasoningStageSummaries: z.array(ReasoningStageSummary).default([]),
+  familyAnalyses: z.array(FamilyAnalysis).default([]),
+  evidenceGraph: EvidenceGraph.default({
+    entrypoints: [],
+    nodes: [],
+    edges: [],
+  }),
   trace: z.array(PhaseLog).default([]),
 });
 export type AuditReport = z.infer<typeof AuditReport>;

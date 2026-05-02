@@ -8,9 +8,7 @@ WORKDIR /app
 
 COPY . .
 
-RUN npm --prefix third_party/npm-package-tester install --legacy-peer-deps \
-  && npm --prefix third_party/npm-package-tester run build \
-  && npm --prefix frontend ci \
+RUN npm --prefix frontend ci \
   && npm --prefix frontend run build \
   && npm --prefix engine ci \
   && npm --prefix engine run build

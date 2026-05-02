@@ -35,6 +35,10 @@ export interface Finding {
   problem: string;
   evidence: string;
   reproductionStrategy: string;
+  entrypointId?: string | null;
+  sinkKind?: string | null;
+  proofType?: "static" | "observed" | "verified";
+  evidenceNodeIds?: string[];
 }
 
 export interface Proof {
@@ -45,6 +49,10 @@ export interface Proof {
   fileLine: string;
   problem: string;
   evidence: string;
+  entrypointId?: string | null;
+  sinkKind?: string | null;
+  proofType?: "static" | "observed" | "verified";
+  evidenceNodeIds?: string[];
   kind: "STRUCTURAL" | "AI_STATIC" | "AI_DYNAMIC" | "TEST_CONFIRMED" | "TEST_UNCONFIRMED";
   reproducible: boolean;
   reproductionCmd: string | null;
@@ -163,6 +171,76 @@ export interface ScanWarning {
   message: string;
 }
 
+export interface PrioritizedEntrypoint {
+  id: string;
+  type: "lifecycle" | "cli" | "main" | "exports" | "script_reference";
+  label: string;
+  file: string;
+  trigger: string;
+  reason: string;
+  priority: number;
+  scriptName: string | null;
+  commandName: string | null;
+}
+
+export interface ReasoningStageSummary {
+  stage: "threat_context" | "entrypoint_prioritization" | "call_chain_expansion" | "evidence_extraction";
+  summary: string;
+  highlights: string[];
+}
+
+export interface FamilyAnalysis {
+  family:
+    | "lifecycle_abuse"
+    | "credential_theft"
+    | "network_exfiltration"
+    | "shell_execution"
+    | "persistence_downloader"
+    | "obfuscation_staged_payloads"
+    | "npm_token_abuse"
+    | "cicd_secret_harvesting";
+  selected: boolean;
+  rationale: string;
+  summary: string;
+  entrypointIds: string[];
+  sinkKinds: string[];
+  observedSignals: string[];
+}
+
+export interface EvidenceGraphNode {
+  id: string;
+  kind: "entrypoint" | "intermediate" | "sink" | "decoded_payload" | "trace_event";
+  label: string;
+  fileLine: string;
+  detail: string;
+  entrypointId: string | null;
+  sinkKind: string | null;
+}
+
+export interface EvidenceGraphEdge {
+  from: string;
+  to: string;
+  relation:
+    | "imports"
+    | "calls"
+    | "reads_env"
+    | "reads_config"
+    | "spawns_process"
+    | "writes_fs"
+    | "makes_network_request"
+    | "evaluates_code"
+    | "decodes_payload"
+    | "triggers_runtime_event";
+  detail: string;
+  confidenceScore: number;
+}
+
+export interface EvidenceGraph {
+  entrypoints: PrioritizedEntrypoint[];
+  nodes: EvidenceGraphNode[];
+  edges: EvidenceGraphEdge[];
+}
+
 export interface AuditLlmOverride {
   providerName?: string;
   baseUrl?: string;
@@ -270,6 +348,10 @@ export interface AuditReport {
   scanWarnings: ScanWarning[];
   cliBehavior: CliBehaviorReport | null;
   findings: Finding[];
+  prioritizedEntrypoints: PrioritizedEntrypoint[];
+  reasoningStageSummaries: ReasoningStageSummary[];
+  familyAnalyses: FamilyAnalysis[];
+  evidenceGraph: EvidenceGraph;
 }
 
 // SSE event payloads — discriminated union for type safety
@@ -339,6 +421,23 @@ export interface AgentReasoningEvent extends BaseEvent {
 export interface FindingDiscoveredEvent extends BaseEvent {
   type: "finding_discovered";
   finding: Finding;
+}
+
+export interface InvestigationStageStartedEvent extends BaseEvent {
+  type: "investigation_stage_started";
+  stage: string;
+  family?: string;
+  entrypointIds?: string[];
+}
+
+export interface InvestigationStageCompletedEvent extends BaseEvent {
+  type: "investigation_stage_completed";
+  stage: string;
+  summary: string;
+  family?: string;
+  entrypointIds?: string[];
+  findingCount?: number;
+  entrypointCount?: number;
 }
 
 export interface VerdictReachedEvent extends BaseEvent {
@@ -447,6 +546,8 @@ export type SSEEvent =
   | AgentToolResultEvent
   | AgentReasoningEvent
   | FindingDiscoveredEvent
+  | InvestigationStageStartedEvent
+  | InvestigationStageCompletedEvent
   | VerdictReachedEvent
   | AgentThinkingEvent
   | TriageProgressEvent

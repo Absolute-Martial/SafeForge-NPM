@@ -36,7 +36,11 @@ export async function evalJsImpl(sandbox: DockerSandboxController, code: string)
   return appendDiagnostics(result.stdout, result, "execution exceeded time limit");
 }
 
-export async function requireAndTraceImpl(sandbox: DockerSandboxController, entrypoint: string): Promise<string> {
+export async function requireAndTraceImpl(
+  sandbox: DockerSandboxController,
+  entrypoint: string,
+  context?: { entrypointId?: string; family?: string },
+): Promise<string> {
   const err = await writeInstrumentation(sandbox);
   if (err) return err;
 
@@ -45,8 +49,12 @@ export async function requireAndTraceImpl(sandbox: DockerSandboxController, entr
     `require(${JSON.stringify("./" + entrypoint)})`,
   ]);
 
+  const prefix = context?.entrypointId || context?.family
+    ? `TRACE CONTEXT: ${JSON.stringify(context)}\n`
+    : "";
+
   return appendDiagnostics(
-    parseTraceLog(result.stdout),
+    prefix + parseTraceLog(result.stdout),
     result,
     "package execution exceeded time limit. This may indicate a DoS payload.",
   );
@@ -56,6 +64,7 @@ export async function runLifecycleHookImpl(
   sandbox: DockerSandboxController,
   hookName: string,
   scripts: Record<string, string>,
+  context?: { entrypointId?: string; family?: string },
 ): Promise<string> {
   if (!ALLOWED_HOOKS.has(hookName)) {
     return `ERROR: hook '${hookName}' not in allowlist: ${[...ALLOWED_HOOKS].sort().join(", ")}`;
@@ -78,8 +87,12 @@ export async function runLifecycleHookImpl(
     result = await sandbox.exec(["sh", "-c", scriptCmd]);
   }
 
+  const prefix = context?.entrypointId || context?.family
+    ? `TRACE CONTEXT: ${JSON.stringify(context)}\n`
+    : "";
+
   return appendDiagnostics(
-    parseTraceLog(result.stdout),
+    prefix + parseTraceLog(result.stdout),
     result,
     "lifecycle hook exceeded time limit",
   );
@@ -89,6 +102,7 @@ export async function fastForwardTimersImpl(
   sandbox: DockerSandboxController,
   entrypoint: string,
   advanceMs: number,
+  context?: { entrypointId?: string; family?: string },
 ): Promise<string> {
   const err = await writeInstrumentation(sandbox);
   if (err) return err;
@@ -99,8 +113,12 @@ export async function fastForwardTimersImpl(
     "node", "--require", "/tmp/_instrument.js", "-e", wrapperCode,
   ]);
 
+  const prefix = context?.entrypointId || context?.family
+    ? `TRACE CONTEXT: ${JSON.stringify(context)}\n`
+    : "";
+
   return appendDiagnostics(
-    parseTraceLog(result.stdout),
+    prefix + parseTraceLog(result.stdout),
     result,
     "timer-advanced execution exceeded limit",
   );

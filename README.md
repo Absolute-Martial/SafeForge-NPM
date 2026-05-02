@@ -22,7 +22,7 @@ Users can keep server defaults in `.env` or override provider, base URL, model, 
 - OSV matching with optional GHSA enrichment and CVE enrichment from NVD
 - recursive inventory and structural risk scanning
 - AI triage and investigation with server-default or per-scan OpenAI-compatible providers
-- native SafeForge CLI discovery and Docker sandboxing inspired by `npm-package-tester`
+- native SafeForge CLI discovery and Docker sandboxing
 - Docker sandbox execution for `--help`, `--version`, and no-args runs
 - Node 22 and Node 24 LTS CLI behavior checks
 - runtime observation for network, env access, child processes, filesystem writes, eval/function usage, and timeout anomalies
@@ -123,7 +123,7 @@ SAFEFORGE_NPM_LLM_API_KEY=your_server_default_key
 
 ## CLI Behavior Sandbox
 
-SafeForge NPM uses native `package.json#bin` discovery plus Docker sandbox execution, with the workflow inspired by `npm-package-tester` rather than depending on its full runtime package.
+SafeForge NPM uses native `package.json#bin` discovery plus Docker sandbox execution.
 
 For each discovered CLI command, SafeForge runs:
 
@@ -249,9 +249,5 @@ SafeForge NPM builds on prior open-source ideas and reworks them into a provider
 
 - Vulnhuntr by Protect AI  
   https://github.com/protectai/vulnhuntr
-- npm-package-tester by kitium-ai  
-  https://github.com/kitium-ai/npm-package-tester
 
 Vulnhuntr informs the staged AI-assisted reasoning workflow and confidence shaping.
-
-npm-package-tester informs CLI discovery, Docker execution patterns, Node-version test matrices, and scenario-driven sandbox behavior checks.

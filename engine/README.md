@@ -142,4 +142,3 @@ The terminal CLI also uses:
 ## References
 
 - Vulnhuntr: https://github.com/protectai/vulnhuntr
-- npm-package-tester: https://github.com/kitium-ai/npm-package-tester
