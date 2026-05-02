@@ -1,0 +1,16 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      SAFEFORGE_NPM_API_HOST: 0.0.0.0
+      SAFEFORGE_NPM_API_PORT: 8000
+      SAFEFORGE_NPM_RUNTIME_ROOT: /runtime
+      SAFEFORGE_NPM_RUNTIME_HOST_ROOT: ${PWD}/.runtime
+      SAFEFORGE_NPM_SANDBOX_NETWORK: none
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${PWD}/.runtime:/runtime

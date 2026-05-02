@@ -1,0 +1,9 @@
+{
+  "name": "safeforge-npm",
+  "private": true,
+  "scripts": {
+    "build": "npm --prefix third_party/npm-package-tester install --legacy-peer-deps && npm --prefix third_party/npm-package-tester run build && npm --prefix frontend install && npm --prefix frontend run build && npm --prefix engine install && npm --prefix engine run build",
+    "start": "node engine/dist/index.js",
+    "dev": "./run.sh"
+  }
+}

@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Discussions
+    url: https://github.com/ashishyd/npm-package-tester/discussions
+    about: Ask questions and discuss ideas with the community
+  - name: 📖 Documentation
+    url: https://github.com/ashishyd/npm-package-tester#readme
+    about: Read the documentation
+  - name: 🐦 Twitter
+    url: https://twitter.com/ashishyd
+    about: Follow for updates and news

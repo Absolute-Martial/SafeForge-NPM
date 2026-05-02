@@ -1,0 +1,60 @@
+name: Question
+description: Ask a question about using npm-package-tester
+title: '[Question]: '
+labels: ['question']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have a question? We're here to help!
+
+        Before asking, please check:
+        - [Documentation](https://github.com/ashishyd/npm-package-tester#readme)
+        - [Existing Issues](https://github.com/ashishyd/npm-package-tester/issues)
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Your Question
+      description: What would you like to know?
+      placeholder: How do I...?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Question Category
+      options:
+        - Getting Started
+        - AI/Test Generation
+        - Private Packages
+        - Docker Configuration
+        - CLI Usage
+        - CI/CD Integration
+        - Troubleshooting
+        - Best Practices
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: What Have You Tried?
+      description: What have you tried so far?
+      placeholder: |
+        I tried...
+        I looked at...
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: Any additional context that might be helpful
+      placeholder: |
+        Environment details:
+        - Package I'm testing: ...
+        - Use case: ...

@@ -1,0 +1,127 @@
+name: Bug Report
+description: Report a bug or unexpected behavior
+title: '[Bug]: '
+labels: ['bug', 'needs-triage']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Please fill out the information below to help us fix the issue.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear and concise description of what the bug is.
+      placeholder: When I run npt test with AI provider, it fails with...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Steps to reproduce the behavior
+      placeholder: |
+        1. Run `npt test <package>`
+        2. See error...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What you expected to happen
+      placeholder: The test should complete successfully and show results
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened (include error messages)
+      placeholder: |
+        Error: Failed to install package
+        Stack trace...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: npm-package-tester Version
+      description: What version are you using? (Run `npt --version`)
+      placeholder: '1.0.0'
+    validations:
+      required: true
+
+  - type: input
+    id: node-version
+    attributes:
+      label: Node.js Version
+      description: What version of Node.js? (Run `node --version`)
+      placeholder: 'v20.10.0'
+    validations:
+      required: true
+
+  - type: input
+    id: docker-version
+    attributes:
+      label: Docker Version
+      description: What version of Docker? (Run `docker --version`)
+      placeholder: 'Docker version 24.0.7'
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      options:
+        - macOS
+        - Linux
+        - Windows
+        - WSL2
+    validations:
+      required: true
+
+  - type: dropdown
+    id: ai-provider
+    attributes:
+      label: AI Provider (if applicable)
+      options:
+        - Not using AI
+        - Anthropic (Claude)
+        - OpenAI (GPT-4)
+        - Google (Gemini)
+        - Groq (Llama)
+    validations:
+      required: false
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration
+      description: Share your test configuration (remove sensitive tokens!)
+      placeholder: |
+        ```bash
+        npt test my-package --node 20 --ai-provider anthropic
+        ```
+      render: bash
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Please provide relevant logs (use --verbose flag)
+      placeholder: Paste logs here
+      render: shell
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: Any other context about the problem
+      placeholder: This started happening after...
