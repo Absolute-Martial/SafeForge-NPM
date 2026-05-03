@@ -1,10 +1,19 @@
-# SafeForge CLI
+# ForgeNPM Local CLI Preview
 
-`safenpm` is the terminal wrapper for SafeForge NPM. Run it before `npm install` so your future self does not have to become a detective at 2 AM.
+`forgenpm` is an unpublished local CLI preview for SafeForge NPM. The main product is still the web dashboard; this wrapper exists to prove the engine can support terminal workflows later.
 
-The CLI talks to a running SafeForge engine. It does not duplicate the scanner; it streams the same dependency, advisory, sandbox, and evidence-backed verdict flow you see in the web app.
+It talks to a running SafeForge engine. It does not duplicate the scanner, store API keys, or replace the dashboard.
 
-## Quick Start
+## Status
+
+- Not published to npm
+- Not available through `npm install -g`
+- Not available through `npx`
+- Intended for local development and future roadmap validation
+
+Run it before a package decision if you are already working from the repo. Your future self may still need coffee, but at least the dependency report will be less mysterious.
+
+## Local Quick Start
 
 From the repo root:
 
@@ -22,64 +31,45 @@ node cli/dist/index.js doctor
 node cli/dist/index.js scan lodash
 ```
 
-After packaging or linking the CLI, the command is:
+If you link or package the CLI locally, the binary name is:
 
 ```bash
-safenpm doctor
-safenpm scan lodash
+forgenpm doctor
+forgenpm scan lodash
 ```
 
 ## Doctor
 
-`doctor` checks whether the local CLI can reach the engine and whether Docker is available for the sandbox work.
+`doctor` checks whether the local CLI can reach the engine and whether Docker is available for sandbox work.
 
 ```bash
-safenpm doctor
+node cli/dist/index.js doctor
 ```
 
-If Docker is missing, `doctor` will say so politely. Unlike your shell history.
-
-Use JSON when a script needs the answer:
+JSON output is available for scripts:
 
 ```bash
-safenpm doctor --json
+node cli/dist/index.js doctor --json
 ```
 
-## Scan
+If Docker is missing, `doctor` will say so directly. Your shell history may still judge you; this command will not.
 
-The main command is:
+## Scan Preview
+
+The preview scan command calls the same engine API used by the dashboard:
 
 ```bash
-safenpm scan <package>
+node cli/dist/index.js scan lodash
+node cli/dist/index.js scan express@4.17.1 --depth 2 --mode balanced
+node cli/dist/index.js scan lodash@4.17.15 --json
 ```
 
-Examples:
-
-```bash
-safenpm scan lodash
-safenpm scan express@4.17.1
-safenpm scan eslint --depth 2
-safenpm scan prettier --mode strict
-```
-
-Friendly aliases are supported:
-
-```bash
-safenpm scan express@4.17.1 --depth 2 --mode balanced --node 22,24
-```
-
-Canonical flags also keep working:
-
-```bash
-safenpm scan express@4.17.1 --scan-depth 2 --security-mode balanced --node-version 22 --node-version 24
-```
-
-## Useful Flags
+Useful local flags:
 
 ```text
 --depth <0-5>                         Dependency scan depth
 --mode <strict|balanced|research>     Security policy mode
---node <22,24>                        Node versions for CLI behavior checks
+--node <22,24>                        Node versions for package behavior checks
 --json                                Print machine-readable output
 --no-publish                          Skip registry publishing
 --rescan                              Ignore a reusable published verdict
@@ -90,46 +80,13 @@ safenpm scan express@4.17.1 --scan-depth 2 --security-mode balanced --node-versi
 --api-key <key>                       Ephemeral per-scan LLM API key
 ```
 
-## JSON And CI
+Canonical flags also work: `--scan-depth`, `--security-mode`, and repeated `--node-version`.
 
-Use `--json` for automation:
+## Roadmap
 
-```bash
-safenpm scan lodash@4.17.15 --depth 1 --json
-```
+The CLI is deliberately small for now. Planned future work:
 
-The CLI exits with:
-
-```text
-0  SAFE
-1  REVIEW REQUIRED
-2  HIGH RISK or BLOCK
-```
-
-A basic CI check can look like:
-
-```bash
-safenpm scan express@4.17.1 --mode strict --depth 2 --json
-```
-
-If the package is spicy, CI gets a non-zero exit and you get a report instead of a surprise.
-
-## Current Commands
-
-Available now:
-
-```text
-safenpm scan <package>
-safenpm doctor
-```
-
-Planned later:
-
-```text
-safenpm scan-lock
-safenpm report <scan-id>
-safenpm config
-safenpm install
-```
-
-Those future commands are intentionally not stubbed here yet. Empty commands are like empty promises, and we are trying to be better than `left-pad` week.
+- Local developer CLI scanner
+- GitHub Action integration
+- npm proxy firewall
+- Enterprise policy dashboard integration
