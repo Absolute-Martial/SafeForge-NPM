@@ -1,0 +1,10 @@
+{
+  "name": "safeforge-npm",
+  "private": true,
+  "scripts": {
+    "build": "npm --prefix cli install && npm --prefix cli run build && npm --prefix frontend install && npm --prefix frontend run build && npm --prefix engine install && npm --prefix engine run build",
+    "start": "node engine/dist/index.js",
+    "dev": "./run.sh",
+    "cli": "node cli/dist/index.js"
+  }
+}

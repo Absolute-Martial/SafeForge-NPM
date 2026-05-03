@@ -1,0 +1,26 @@
+node_modules
+.DS_Store
+.env
+.env.*
+!.env.example
+!.env.template
+openclaw/.env.gateway
+dist
+build
+coverage
+.cache
+videos
+settings.local.json
+audit-logs/
+
+# Claude workspace
+.claude-workspace/
+.claude/
+
+# Demo output
+scripts/demo-results.json
+
+# Nexforge portal materials are submitted separately, not committed.
+submission/
+CLAUDE.md
+Agent.md
