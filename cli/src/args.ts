@@ -48,7 +48,7 @@ export function parseCliArgs(argv: string[], env = process.env): ParsedCommand {
   if (command === "scan") {
     const packageArg = rest[0];
     if (!packageArg || packageArg.startsWith("--")) {
-      throw new Error("Usage: safenpm scan <package[@version]>");
+      throw new Error("Usage: forgenpm scan <package[@version]>");
     }
 
     const packageSpec = parsePackageSpec(packageArg);

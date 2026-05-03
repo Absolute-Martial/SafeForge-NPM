@@ -53,7 +53,7 @@ async function runScan(flags: ReturnType<typeof parseCliArgs> extends infer T
   ? T extends { command: "scan"; flags: infer F } ? F : never
   : never): Promise<number> {
   const status = await fetchCliStatus(flags.apiUrl).catch((error) => {
-    throw new Error(`SafeForge engine is not reachable at ${flags.apiUrl}. Run 'safenpm doctor' for help.\n${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`SafeForge engine is not reachable at ${flags.apiUrl}. Run 'forgenpm doctor' for help.\n${error instanceof Error ? error.message : String(error)}`);
   });
 
   let registryPrecheck = null;
@@ -259,11 +259,11 @@ function asOptionalString(value: unknown): string | null {
 function printHelp() {
   process.stdout.write(
     [
-      "SafeForge NPM CLI",
+      "ForgeNPM local CLI preview",
       "",
       "Usage:",
-      "  safenpm scan <package[@version]> [--api-url URL] [--rescan] [--json] [--no-publish]",
-      "  safenpm doctor [--api-url URL] [--json]",
+      "  forgenpm scan <package[@version]> [--api-url URL] [--rescan] [--json] [--no-publish]",
+      "  forgenpm doctor [--api-url URL] [--json]",
       "",
       "Scan flags:",
       "  --node, --node-version <22|24>",
