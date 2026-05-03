@@ -15,7 +15,7 @@ import { createSession, getSession, finalizeSession, createEmitFn, type AuditEve
 import { cleanupPackage } from "./phases/resolve.js";
 import { AuditLlmOverrideSchema, AuditSandboxOptionsSchema, normalizeAuditRunOptions, sanitizeAuditRunOptions, SecurityModeSchema, type AuditRunOptions } from "./audit-options.js";
 import { isPublishConfigured, isRegistryReadConfigured, isRegistryWriteConfigured, readPublishedAuditStatus } from "./registry.js";
-import { getSettingsFilePath, readResolvedSettings, StoredSettingsSchema, writeSavedSettings } from "./settings-store.js";
+import { getSettingsFilePath, readResolvedSettings, StoredSettingsSchema, toPublicSettings, writeSavedSettings } from "./settings-store.js";
 import { reloadConfig } from "./config.js";
 
 const app = new Hono();
@@ -381,7 +381,7 @@ app.get("/registry/precheck", async (c) => {
 app.get("/settings", (c) => {
   const settings = readResolvedSettings();
   return c.json({
-    settings,
+    settings: toPublicSettings(settings),
     configPath: getSettingsFilePath(),
   });
 });
@@ -403,7 +403,7 @@ app.put("/settings", async (c) => {
     const settings = writeSavedSettings(parsed.data);
     reloadConfig();
     return c.json({
-      settings,
+      settings: toPublicSettings(settings),
       configPath: getSettingsFilePath(),
     });
   } catch (error) {

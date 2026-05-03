@@ -1,189 +1,48 @@
 # SafeForge NPM
 
-Recursive AI-powered npm supply chain security and behavior testing scanner.
+## Overview
+
+SafeForge NPM is a web-based npm supply-chain intelligence dashboard for recursive dependency analysis, CVE checks, sandbox behavior monitoring, AI reasoning, and explainable package risk reports.
 
 Submitted for Nexforge under the Cybersecurity & Digital Privacy track.
 
-## Elevator Pitch
+## Problem Statement
 
-SafeForge NPM helps developers scan npm packages before installation, turning dependency risk into an explainable verdict before suspicious code reaches a local machine or CI pipeline.
+npm packages can bring vulnerable dependencies, compromised maintainer releases, suspicious lifecycle scripts, credential access, command execution, and unexpected network behavior into a project through one install decision.
 
-SafeForge NPM audits npm packages before installation by combining recursive dependency graphing, live advisory intelligence, AI-assisted reasoning, runtime sandbox monitoring, and CLI behavior testing across isolated Node environments.
+Most package checks stop at known CVEs. That is useful, but incomplete: malicious packages often hide in install scripts, CLI entrypoints, obfuscated loaders, and runtime behavior that only appears when the package is executed.
 
-## Motivation
+## Solution
 
-npm supply-chain risk is an active, ongoing problem: vulnerable package versions, compromised maintainers, dependency confusion, malicious lifecycle scripts, credential harvesting, and unexpected install-time behavior can all enter a project through one dependency decision.
+SafeForge NPM gives developers a web dashboard that scans a package before trust is granted. It resolves the package, builds a dependency graph, checks advisory databases, analyzes source code, runs package behavior inside Docker sandboxes, monitors risky runtime activity, and generates a clear score and verdict.
 
-SafeForge NPM was built as a practical response to that risk. The core idea is simple: scan first, inspect evidence, then decide whether a package should be trusted.
+The goal is not just to say "bad package" or "good package." The goal is to show evidence: which dependency is affected, which file looks risky, what behavior happened in the sandbox, and why the final verdict was produced.
 
-The project also uses public vulnerability intelligence sources such as OSV, GitHub Advisory-style records, and NVD enrichment to identify known high and critical vulnerabilities in npm dependency trees.
+## Key Features
 
-## Reference Material
+- Web-based npm package scanner
+- Recursive dependency graph analysis
+- OSV and GitHub Advisory-style vulnerability lookup
+- NVD CVE enrichment
+- Static JavaScript risk analysis
+- Lifecycle script detection
+- Suspicious command and API usage detection
+- Docker-based sandbox behavior monitoring
+- Web/API request attempt logging
+- Command execution analysis
+- File write and environment access monitoring
+- AI-assisted risk reasoning
+- Explainable risk scoring
+- `SAFE`, `REVIEW REQUIRED`, `HIGH RISK`, or `BLOCK` verdicts
+- Exportable scan reports
 
-SafeForge NPM is original hackathon work. During design, public security and package-testing projects were reviewed as reference material, while SafeForge NPM implements its own scanner, sandbox orchestration, scoring, reporting, and CLI flow.
+## Demo
 
-- Vulnhuntr: reviewed as a reference for staged AI-assisted vulnerability reasoning and confidence discipline.  
-  https://github.com/protectai/vulnhuntr
-- npm-package-tester: reviewed as a reference for npm CLI discovery, package behavior testing, and Docker-based execution patterns.  
-  https://github.com/kitium-ai/npm-package-tester
-
-## Configuration Model
-
-SafeForge NPM supports provider-agnostic LLM configuration through OpenAI-compatible APIs.
-
-Users can keep server defaults in `.env` or override provider, base URL, model, and API key per scan from the UI. Per-scan API keys are ephemeral and are not written to browser storage, audit reports, or SSE event payloads. LLM analysis can also be disabled so the tool runs deterministic database and sandbox checks only.
-
-## Current MVP
-
-- package input with `package` or `package@version`
-- terminal-native `safenpm scan` and `safenpm doctor` commands
-- settings-first web UI backed by `settings.local.json`
-- recursive dependency graph construction from a generated lockfile
-- OSV matching with optional GHSA enrichment and CVE enrichment from NVD
-- recursive inventory and structural risk scanning
-- AI triage and investigation with server-default or per-scan OpenAI-compatible providers
-- native SafeForge CLI discovery and Docker sandboxing
-- Docker sandbox execution for `--help`, `--version`, and no-args runs
-- Node 22 and Node 24 LTS CLI behavior checks
-- runtime observation for network, env access, child processes, filesystem writes, eval/function usage, and timeout anomalies
-- dependency/advisory warnings and explainable affected paths
-- explainable `SAFE`, `REVIEW REQUIRED`, `HIGH RISK`, or `BLOCK` verdicts
-
-## Architecture
-
-```text
-User enters package@version
-        |
-        v
-Package Resolver
-        |
-        v
-Recursive Dependency Graph
-        |
-        v
-Advisory Intelligence
-        |-- OSV exact package/version matching
-        |-- GHSA enrichment when token is available
-        `-- NVD enrichment for CVE aliases
-        |
-        v
-Recursive Dependency + Inventory Scan
-        |
-        v
-Static Risk Scanner
-        |-- lifecycle scripts
-        |-- eval / Function
-        |-- child_process
-        |-- fs access
-        |-- http / https / net / dns
-        `-- obfuscation signals
-        |
-        v
-CLI Discovery
-        `-- native SafeForge bin discovery
-        |
-        v
-CLI Behavior Sandbox
-        |-- Node 22
-        |-- Node 24
-        |-- --help
-        |-- --version
-        `-- no-args
-        |
-        v
-AI Triage + Investigation
-        |
-        v
-Proof Generation + Verification
-        |
-        v
-Explainable Verdict
-```
-
-## Settings-First Setup
-
-The web app now opens on a settings-first control surface. Saving that form writes local engine configuration to:
-
-```text
-settings.local.json
-```
-
-That file can hold:
-
-```json
-{
-  "llmEnabled": true,
-  "llmBackend": "openai_compatible",
-  "llmBaseUrl": "https://api.openai.com/v1",
-  "llmApiKey": "your_key",
-  "triageModel": "gpt-4.1-mini",
-  "investigationModel": "gpt-4.1",
-  "testGenModel": "gpt-4.1",
-  "githubToken": "ghp_...",
-  "nvdApiKey": "nvd_...",
-  "defaultNodeVersions": ["22", "24"],
-  "defaultScanDepth": 3,
-  "defaultSecurityMode": "balanced",
-  "cliBehaviorEnabled": true,
-  "publishEnabled": true
-}
-```
-
-The settings page can also query `/models` from any OpenAI-compatible base URL through the engine, so model dropdowns can populate without exposing provider API calls directly to the browser.
-
-If `llmEnabled` is off, SafeForge skips LLM triage/investigation/test generation and returns database plus deterministic scan results only.
-
-Environment variables are still supported as fallback defaults:
-
-```bash
-SAFEFORGE_NPM_LLM_BACKEND=openai_compatible
-SAFEFORGE_NPM_LLM_BASE_URL=https://api.openai.com/v1
-SAFEFORGE_NPM_LLM_API_KEY=your_server_default_key
-```
-
-## CLI Behavior Sandbox
-
-SafeForge NPM uses native `package.json#bin` discovery plus Docker sandbox execution.
-
-For each discovered CLI command, SafeForge runs:
-
-```bash
-tool --help
-tool --version
-tool
-```
-
-Those commands execute inside constrained Docker sandboxes with runtime instrumentation. SafeForge records whether the package:
-
-- attempts outbound network access
-- reads sensitive environment variables
-- spawns child processes
-- writes outside the allowed workspace
-- evaluates dynamic code
-- times out or emits suspiciously large output
-
-High-risk observed behavior is promoted directly into findings and materially increases the final 0-100 score, even when static triage is otherwise low.
-
-## Advisory Pipeline
-
-For every resolved package version in the dependency graph, SafeForge:
-
-1. queries OSV as the primary exact-match vulnerability source
-2. enriches GHSA aliases through the GitHub advisory API when `SAFEFORGE_NPM_GITHUB_TOKEN` is set
-3. enriches CVE aliases from NVD
-4. deduplicates results into one advisory record with severity, fixed version, aliases, and dependency path context
-
-High and critical advisories, plus malware-style advisories, materially raise the final score and can drive the verdict into `HIGH RISK` or `BLOCK`.
-
-## Running It
-
-The simplest end-to-end path is Docker Compose:
+Run the full prototype locally with Docker Compose:
 
 ```bash
 docker compose up --build
 ```
-
-That starts the engine, serves the built frontend from the same container, mounts the Docker socket for sibling sandboxes, and uses `./.runtime` as the shared runtime root for package resolution and sandbox workspaces.
 
 Open:
 
@@ -191,92 +50,247 @@ Open:
 http://127.0.0.1:8000
 ```
 
-The first screen is the settings page. Configure your provider, models, and vulnerability-enrichment tokens there, save them, and then run scans from the same page.
-
-## Terminal CLI
-
-SafeForge ships a terminal-native wrapper in `cli/`. It talks to the running engine and gives you the same verdict flow from the terminal, where packages usually start causing mischief.
-
-```bash
-npm --prefix cli install
-npm --prefix cli run build
-node cli/dist/index.js doctor
-node cli/dist/index.js scan lodash
-```
-
-Once the package is published, the intended entrypoint is:
-
-```bash
-safenpm doctor
-safenpm scan event-stream@3.3.6
-```
-
-Common examples:
-
-```bash
-safenpm scan lodash
-safenpm scan express@4.17.1 --depth 2 --mode balanced
-safenpm scan prettier --mode strict
-safenpm scan lodash@4.17.15 --json
-safenpm scan eslint@9.0.0 --node 22,24 --depth 2
-safenpm scan react@19.0.0 --provider openai --base-url https://api.openai.com/v1 --model gpt-4.1-mini --api-key "$SAFEFORGE_NPM_SCAN_API_KEY"
-```
-
-Useful flags:
+Suggested demo package inputs:
 
 ```text
---depth <0-5>                         dependency scan depth
---mode <strict|balanced|research>     security policy mode
---node <22,24>                        Node versions for CLI behavior checks
---json                                machine-readable output
---no-publish                          skip registry publishing
---rescan                              force a fresh scan
+is-number@7.0.0
+lodash@4.17.15
+express@4.17.1
 ```
 
-The canonical forms also work: `--scan-depth`, `--security-mode`, and `--node-version`.
+The dashboard is the main product surface. It is designed for package lookup, scan configuration, live activity, sandbox telemetry, advisory results, and final risk reports.
 
-Available commands today are `safenpm scan <package>` and `safenpm doctor`. Future commands such as `scan-lock`, `report`, `config`, and install blocking are intentionally not documented as current features yet. We like ambition; we also like not lying to tired developers.
+Full setup details are in [docs/INSTALLATION.md](docs/INSTALLATION.md).
 
-More CLI examples live in [cli/README.md](cli/README.md).
+## Screenshots
 
-## Local Development
+Screenshots can be captured from the running dashboard after starting Docker Compose. Recommended views for submission:
+
+- Settings page with vulnerability and LLM configuration
+- Active scan progress
+- Final verdict panel
+- Dependency and advisory results
+- Sandbox behavior monitoring section
+
+## How It Works
+
+```text
+User enters package@version
+        ↓
+Package metadata is resolved
+        ↓
+Recursive dependency graph is built
+        ↓
+Known vulnerabilities are checked through advisory databases
+        ↓
+Source files are statically analyzed for suspicious patterns
+        ↓
+CLI/package behavior is executed inside a hardened sandbox
+        ↓
+Network, command, file, and environment activity is monitored
+        ↓
+AI reasoning explains suspicious findings
+        ↓
+Policy engine generates final risk score and verdict
+```
+
+More detail is available in [docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md).
+
+## Dashboard Guide
+
+1. Open the web app.
+2. Configure settings if needed:
+   - LLM provider and model
+   - GitHub token for advisory enrichment
+   - NVD API key for CVE enrichment
+   - Node versions and sandbox options
+   - scan depth and security mode
+3. Enter an npm package name or exact `package@version`.
+4. Start the scan.
+5. Review the live activity feed.
+6. Inspect the final report:
+   - dependency graph summary
+   - advisory matches
+   - static findings
+   - sandbox behavior events
+   - AI reasoning output when enabled
+   - final score and verdict
+
+LLM reasoning is optional. If it is disabled, SafeForge still performs deterministic dependency, advisory, static, and sandbox checks.
+
+## Technical Architecture
+
+```text
+frontend/
+  React dashboard for scan setup, live SSE activity, settings, and reports
+
+engine/
+  TypeScript API service for package resolution, advisory lookup, analysis,
+  sandbox orchestration, scoring, reports, and settings persistence
+
+sandbox/
+  Local fixtures and behavior-test harnesses used by the engine test suite
+
+cli/
+  Unpublished local CLI preview for future developer workflow support
+```
+
+Runtime flow:
+
+```text
+Frontend -> Engine API -> npm metadata / lockfile workspace
+                    -> OSV / GitHub Advisory / NVD enrichment
+                    -> static inventory and risk scanner
+                    -> Docker sandbox workers
+                    -> optional OpenAI-compatible LLM reasoning
+                    -> final report
+```
+
+The full architecture notes are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Vulnerability Data Sources
+
+SafeForge NPM uses advisory data as evidence, not guesswork:
+
+- OSV is the primary package/version vulnerability matcher.
+- GitHub Advisory-style data enriches GHSA details when a token is configured.
+- NVD enriches CVE aliases with severity and references when available.
+
+High and critical matches increase the score significantly. Moderate and low findings are still reported so developers can review dependency paths and fixed versions.
+
+## Sandbox Design
+
+SafeForge executes package behavior inside Docker-based sandboxes rather than on the host project.
+
+The sandbox design focuses on:
+
+- isolated temporary workspaces
+- Node 22 and Node 24 behavior checks
+- constrained container execution
+- blocked/default-controlled network behavior
+- instrumentation for network, DNS, process, filesystem, environment, and dynamic-code events
+- redaction of secrets in events and reports
+
+Observed high-risk behavior, such as suspicious network attempts, sensitive environment reads, shell execution, or write attempts outside the expected workspace, is promoted into findings.
+
+## Risk Scoring Model
+
+SafeForge reports a 0-100 score and a four-tier verdict:
+
+```text
+0-24     SAFE
+25-49    REVIEW REQUIRED
+50-74    HIGH RISK
+75-100   BLOCK
+```
+
+The score combines:
+
+- advisory severity
+- vulnerable dependency depth
+- static JavaScript risk signals
+- lifecycle script risk
+- sandbox runtime behavior
+- command and API usage
+- environment and file access
+- AI confidence when LLM reasoning is enabled
+
+The report keeps evidence close to each finding so users can understand why the score changed.
+
+## Setup Instructions
 
 Prerequisites:
 
 - Node.js 22+
 - Docker
-- an LLM API key if you want live AI phases
+- Docker Compose
+- an LLM API key only if you want AI-assisted reasoning
 
-Run the engine:
+Run the production-style local stack:
+
+```bash
+docker compose up --build
+```
+
+For server deployment with Docker Compose, use [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) and `compose.deploy.yaml`.
+
+Run engine and frontend separately for local development:
 
 ```bash
 npm --prefix engine install
 npm --prefix engine run dev
 ```
 
-Run the frontend:
-
 ```bash
 npm --prefix frontend install
 npm --prefix frontend run dev
 ```
 
-Production build:
+Build everything:
 
 ```bash
 npm run build
 ```
 
-## Verification
+For troubleshooting and first-scan guidance, see [docs/INSTALLATION.md](docs/INSTALLATION.md).
 
-The current implementation has been verified with:
+## Environment Variables
 
-- `npm --prefix engine run build`
-- `npm --prefix cli run build`
-- `npx --prefix cli tsx --test cli/tests/unit/args.test.ts`
-- `npm --prefix frontend run lint`
-- `npm --prefix frontend run build`
-- `npx --prefix engine tsx --test engine/tests/unit/audit-options.test.ts engine/tests/unit/config.test.ts engine/tests/unit/models.test.ts engine/tests/unit/scoring.test.ts`
-- `node cli/dist/index.js doctor --api-url http://127.0.0.1:8124 --json`
-- `node cli/dist/index.js scan is-number@7.0.0 --api-url http://127.0.0.1:8124 --json --no-publish`
-- targeted engine unit tests for audit option sanitization, CLI command detection, runtime risk mapping, provider override behavior, config loading, and sandbox instrumentation
+SafeForge can be configured through environment variables or through the web settings page, which writes local configuration to `settings.local.json`.
+
+Common settings:
+
+```bash
+SAFEFORGE_NPM_LLM_BACKEND=openai_compatible
+SAFEFORGE_NPM_LLM_BASE_URL=https://api.openai.com/v1
+SAFEFORGE_NPM_LLM_API_KEY=your_server_default_key
+SAFEFORGE_NPM_TRIAGE_MODEL=gpt-4.1-mini
+SAFEFORGE_NPM_INVESTIGATION_MODEL=gpt-4.1
+SAFEFORGE_NPM_TEST_GEN_MODEL=gpt-4.1
+SAFEFORGE_NPM_GITHUB_TOKEN=your_github_token
+SAFEFORGE_NPM_NVD_API_KEY=your_nvd_key
+SAFEFORGE_NPM_RUNTIME_ROOT=/runtime
+```
+
+LLM API keys are optional and can be disabled for database-only and deterministic scans. Per-scan API keys are treated as ephemeral and must not be written to browser storage, SSE payloads, logs, or reports.
+
+## Project Structure
+
+```text
+.
+├── cli/          # unpublished local ForgeNPM CLI preview
+├── docs/         # installation, architecture, deployment, and flow notes
+├── engine/       # TypeScript audit engine and API
+├── frontend/     # React dashboard
+├── sandbox/      # sandbox fixtures and harness tests
+├── compose.deploy.yaml
+├── compose.yaml  # one-command local runtime
+├── Dockerfile
+└── README.md
+```
+
+The CLI preview is not published to npm. If linked locally, its binary is `forgenpm`, but CLI distribution is roadmap work rather than the primary feature of this submission.
+
+## Originality and Attribution
+
+SafeForge NPM is original hackathon work. It implements its own dashboard, engine pipeline, sandbox orchestration, scoring, reporting, and settings model.
+
+Public projects reviewed during design:
+
+- Vulnhuntr: reference for staged AI-assisted vulnerability reasoning and confidence discipline.  
+  https://github.com/protectai/vulnhuntr
+- npm-package-tester: reference for npm CLI discovery, package behavior testing, and Docker-based execution patterns.  
+  https://github.com/kitium-ai/npm-package-tester
+
+These projects were used as design references only; SafeForge NPM does not vendor their source code.
+
+## Roadmap
+
+- CLI scanner for local developer workflows
+- GitHub Action integration
+- npm proxy firewall
+- Enterprise policy dashboard
+
+## License
+
+No explicit open-source license has been added yet. Add a license before distributing or accepting external contributions.
