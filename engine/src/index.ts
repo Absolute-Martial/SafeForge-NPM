@@ -451,7 +451,24 @@ app.post("/settings/models", async (c) => {
       return c.json({ error: `Model discovery failed with ${response.status} ${response.statusText}` }, 502);
     }
 
-    const payload = await response.json() as { data?: Array<{ id?: string }> };
+    const contentType = response.headers.get("content-type") ?? "";
+    const rawPayload = await response.text();
+    if (!contentType.toLowerCase().includes("application/json")) {
+      const preview = rawPayload.trim().slice(0, 80);
+      return c.json({
+        error: `Model discovery expected OpenAI-compatible JSON from ${modelsUrl.toString()}, but received ${contentType || "unknown content type"}${preview.startsWith("<!DOCTYPE") || preview.startsWith("<html") ? " HTML" : ""}. Check that the base URL points to an API endpoint, not a web page.`,
+      }, 502);
+    }
+
+    let payload: { data?: Array<{ id?: string }> };
+    try {
+      payload = JSON.parse(rawPayload) as { data?: Array<{ id?: string }> };
+    } catch {
+      return c.json({
+        error: `Model discovery received invalid JSON from ${modelsUrl.toString()}. Check the provider base URL and API compatibility.`,
+      }, 502);
+    }
+
     const models = (payload.data ?? [])
       .map((entry) => entry.id)
       .filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
