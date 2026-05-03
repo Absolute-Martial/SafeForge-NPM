@@ -15,7 +15,7 @@ import { createSession, getSession, finalizeSession, createEmitFn, type AuditEve
 import { cleanupPackage } from "./phases/resolve.js";
 import { AuditLlmOverrideSchema, AuditSandboxOptionsSchema, normalizeAuditRunOptions, sanitizeAuditRunOptions, SecurityModeSchema, type AuditRunOptions } from "./audit-options.js";
 import { isPublishConfigured, isRegistryReadConfigured, isRegistryWriteConfigured, readPublishedAuditStatus } from "./registry.js";
-import { getSettingsFilePath, readResolvedSettings, StoredSettingsSchema, writeSavedSettings } from "./settings-store.js";
+import { getSettingsFilePath, readResolvedSettings, StoredSettingsSchema, toPublicSettings, writeSavedSettings } from "./settings-store.js";
 import { reloadConfig } from "./config.js";
 
 const app = new Hono();
@@ -381,7 +381,7 @@ app.get("/registry/precheck", async (c) => {
 app.get("/settings", (c) => {
   const settings = readResolvedSettings();
   return c.json({
-    settings,
+    settings: toPublicSettings(settings),
     configPath: getSettingsFilePath(),
   });
 });
@@ -403,7 +403,7 @@ app.put("/settings", async (c) => {
     const settings = writeSavedSettings(parsed.data);
     reloadConfig();
     return c.json({
-      settings,
+      settings: toPublicSettings(settings),
       configPath: getSettingsFilePath(),
     });
   } catch (error) {
@@ -451,7 +451,24 @@ app.post("/settings/models", async (c) => {
       return c.json({ error: `Model discovery failed with ${response.status} ${response.statusText}` }, 502);
     }
 
-    const payload = await response.json() as { data?: Array<{ id?: string }> };
+    const contentType = response.headers.get("content-type") ?? "";
+    const rawPayload = await response.text();
+    if (!contentType.toLowerCase().includes("application/json")) {
+      const preview = rawPayload.trim().slice(0, 80);
+      return c.json({
+        error: `Model discovery expected OpenAI-compatible JSON from ${modelsUrl.toString()}, but received ${contentType || "unknown content type"}${preview.startsWith("<!DOCTYPE") || preview.startsWith("<html") ? " HTML" : ""}. Check that the base URL points to an API endpoint, not a web page.`,
+      }, 502);
+    }
+
+    let payload: { data?: Array<{ id?: string }> };
+    try {
+      payload = JSON.parse(rawPayload) as { data?: Array<{ id?: string }> };
+    } catch {
+      return c.json({
+        error: `Model discovery received invalid JSON from ${modelsUrl.toString()}. Check the provider base URL and API compatibility.`,
+      }, 502);
+    }
+
     const models = (payload.data ?? [])
       .map((entry) => entry.id)
       .filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
