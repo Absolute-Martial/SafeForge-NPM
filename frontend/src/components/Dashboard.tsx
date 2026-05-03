@@ -9,11 +9,14 @@ const DEFAULT_SETTINGS: AppSettings = {
   llmBackend: "openai_compatible",
   llmBaseUrl: "https://api.openai.com/v1",
   llmApiKey: "",
+  llmApiKeyConfigured: false,
   triageModel: "gpt-4.1-mini",
   investigationModel: "gpt-4.1",
   testGenModel: "gpt-4.1",
   githubToken: "",
+  githubTokenConfigured: false,
   nvdApiKey: "",
+  nvdApiKeyConfigured: false,
   defaultNodeVersions: ["22", "24"],
   defaultScanDepth: 3,
   defaultSecurityMode: "balanced",
@@ -48,6 +51,29 @@ function parsePackageInput(input: string): { packageName: string; version?: stri
   return { packageName, version: version || undefined };
 }
 
+function mergePublicSettings(incoming: AppSettings): AppSettings {
+  return {
+    ...DEFAULT_SETTINGS,
+    ...incoming,
+    llmApiKey: "",
+    githubToken: "",
+    nvdApiKey: "",
+    llmApiKeyConfigured: incoming.llmApiKeyConfigured ?? false,
+    githubTokenConfigured: incoming.githubTokenConfigured ?? false,
+    nvdApiKeyConfigured: incoming.nvdApiKeyConfigured ?? false,
+    runtimeRoot: incoming.runtimeRoot ?? "",
+    runtimeHostRoot: incoming.runtimeHostRoot ?? "",
+  };
+}
+
+function buildSettingsPayload(settings: AppSettings): Partial<AppSettings> {
+  const { llmApiKeyConfigured, githubTokenConfigured, nvdApiKeyConfigured, ...payload } = settings;
+  if (!payload.llmApiKey?.trim()) delete payload.llmApiKey;
+  if (!payload.githubToken?.trim()) delete payload.githubToken;
+  if (!payload.nvdApiKey?.trim()) delete payload.nvdApiKey;
+  return payload;
+}
+
 export function Dashboard() {
   const startAudit = useAuditStore((s) => s.startAudit);
   const isRunning = useAuditStore((s) => s.isRunning);
@@ -73,15 +99,7 @@ export function Dashboard() {
         }
         const payload = await response.json() as SettingsResponse;
         if (!active) return;
-        setSettings({
-          ...DEFAULT_SETTINGS,
-          ...payload.settings,
-          llmApiKey: payload.settings.llmApiKey ?? "",
-          githubToken: payload.settings.githubToken ?? "",
-          nvdApiKey: payload.settings.nvdApiKey ?? "",
-          runtimeRoot: payload.settings.runtimeRoot ?? "",
-          runtimeHostRoot: payload.settings.runtimeHostRoot ?? "",
-        });
+        setSettings(mergePublicSettings(payload.settings));
         setConfigPath(payload.configPath);
         setLoadError(null);
       } catch (fetchError) {
@@ -141,22 +159,14 @@ export function Dashboard() {
       const response = await fetch(`${API_BASE}/settings`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(settings),
+        body: JSON.stringify(buildSettingsPayload(settings)),
       });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
         throw new Error(body.error ?? `Settings save failed (${response.status})`);
       }
       const payload = await response.json() as SettingsResponse;
-      setSettings({
-        ...DEFAULT_SETTINGS,
-        ...payload.settings,
-        llmApiKey: payload.settings.llmApiKey ?? "",
-        githubToken: payload.settings.githubToken ?? "",
-        nvdApiKey: payload.settings.nvdApiKey ?? "",
-        runtimeRoot: payload.settings.runtimeRoot ?? "",
-        runtimeHostRoot: payload.settings.runtimeHostRoot ?? "",
-      });
+      setSettings(mergePublicSettings(payload.settings));
       setConfigPath(payload.configPath);
       setSaveMessage("Saved to settings.local.json");
       return true;
@@ -178,7 +188,6 @@ export function Dashboard() {
         body: JSON.stringify({
           backend: settings.llmBackend,
           baseUrl: settings.llmBaseUrl,
-          apiKey: settings.llmApiKey || undefined,
         }),
       });
       const payload = await response.json() as { models?: string[]; error?: string; warning?: string };
@@ -408,7 +417,7 @@ export function Dashboard() {
                 type="password"
                 value={settings.llmApiKey ?? ""}
                 onChange={(event) => updateSettings("llmApiKey", event.target.value)}
-                placeholder="sk-..."
+                placeholder={settings.llmApiKeyConfigured ? "Saved server-side; enter a new key to replace" : "sk-..."}
                 autoComplete="off"
                 style={inputStyle}
                 disabled={!settings.llmEnabled}
@@ -470,7 +479,7 @@ export function Dashboard() {
                 type="password"
                 value={settings.githubToken ?? ""}
                 onChange={(event) => updateSettings("githubToken", event.target.value)}
-                placeholder="ghp_..."
+                placeholder={settings.githubTokenConfigured ? "Saved server-side; enter a new token to replace" : "ghp_..."}
                 autoComplete="off"
                 style={inputStyle}
               />
@@ -480,7 +489,7 @@ export function Dashboard() {
                 type="password"
                 value={settings.nvdApiKey ?? ""}
                 onChange={(event) => updateSettings("nvdApiKey", event.target.value)}
-                placeholder="NVD key"
+                placeholder={settings.nvdApiKeyConfigured ? "Saved server-side; enter a new key to replace" : "NVD key"}
                 autoComplete="off"
                 style={inputStyle}
               />

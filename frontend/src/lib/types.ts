@@ -267,11 +267,14 @@ export interface AppSettings {
   llmBackend: "anthropic" | "openai_compatible";
   llmBaseUrl: string;
   llmApiKey?: string;
+  llmApiKeyConfigured?: boolean;
   triageModel: string;
   investigationModel: string;
   testGenModel: string;
   githubToken?: string;
+  githubTokenConfigured?: boolean;
   nvdApiKey?: string;
+  nvdApiKeyConfigured?: boolean;
   defaultNodeVersions: NodeVersion[];
   defaultScanDepth: number;
   defaultSecurityMode: SecurityMode;

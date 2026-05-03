@@ -32,6 +32,11 @@ export const StoredSettingsSchema = z.object({
 });
 
 export type StoredSettings = z.infer<typeof StoredSettingsSchema>;
+export type PublicSettings = Omit<StoredSettings, "llmApiKey" | "githubToken" | "nvdApiKey"> & {
+  llmApiKeyConfigured: boolean;
+  githubTokenConfigured: boolean;
+  nvdApiKeyConfigured: boolean;
+};
 
 const SETTINGS_FILE_PATH = path.resolve(import.meta.dirname, "../../settings.local.json");
 
@@ -60,8 +65,18 @@ export function readResolvedSettings(): StoredSettings {
   });
 }
 
+export function toPublicSettings(settings: StoredSettings): PublicSettings {
+  const { llmApiKey, githubToken, nvdApiKey, ...publicSettings } = settings;
+  return {
+    ...publicSettings,
+    llmApiKeyConfigured: Boolean(llmApiKey),
+    githubTokenConfigured: Boolean(githubToken),
+    nvdApiKeyConfigured: Boolean(nvdApiKey),
+  };
+}
+
 export function writeSavedSettings(input: Partial<StoredSettings>): StoredSettings {
-  const normalizedInput = {
+  const normalizedInput = stripUndefined({
     ...input,
     llmApiKey: normalizeOptionalString(input.llmApiKey),
     githubToken: normalizeOptionalString(input.githubToken),
@@ -69,7 +84,7 @@ export function writeSavedSettings(input: Partial<StoredSettings>): StoredSettin
     runtimeRoot: normalizeOptionalString(input.runtimeRoot),
     runtimeHostRoot: normalizeOptionalString(input.runtimeHostRoot),
     llmBaseUrl: normalizeBaseUrl(input.llmBaseUrl),
-  };
+  });
   const merged = StoredSettingsSchema.parse({
     ...readResolvedSettings(),
     ...normalizedInput,
@@ -90,4 +105,10 @@ function normalizeBaseUrl(value: string | undefined): string | undefined {
   if (typeof value !== "string") return value;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function stripUndefined<T extends Record<string, unknown>>(input: T): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(input).filter(([, value]) => value !== undefined),
+  ) as Partial<T>;
 }
