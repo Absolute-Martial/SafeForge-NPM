@@ -46,12 +46,12 @@ export function parseCliArgs(argv: string[], env = process.env): ParsedCommand {
   }
 
   if (command === "scan") {
-    const positional = rest.filter((arg) => !arg.startsWith("--"));
-    if (positional.length === 0) {
+    const packageArg = rest[0];
+    if (!packageArg || packageArg.startsWith("--")) {
       throw new Error("Usage: safenpm scan <package[@version]>");
     }
 
-    const packageSpec = parsePackageSpec(positional[0]!);
+    const packageSpec = parsePackageSpec(packageArg);
     const parsed = parseFlags(rest, env);
     return {
       command: "scan",
@@ -121,12 +121,14 @@ function parseFlags(args: string[], env: NodeJS.ProcessEnv) {
       case "--no-publish":
         noPublish = true;
         break;
+      case "--depth":
       case "--scan-depth":
         scanDepth = Number(consumeValue());
         if (!Number.isInteger(scanDepth) || scanDepth < 0 || scanDepth > 5) {
           throw new Error("Scan depth must be an integer between 0 and 5");
         }
         break;
+      case "--mode":
       case "--security-mode": {
         const value = consumeValue();
         if (value !== "strict" && value !== "balanced" && value !== "research") {
@@ -147,6 +149,7 @@ function parseFlags(args: string[], env: NodeJS.ProcessEnv) {
       case "--model":
         model = consumeValue();
         break;
+      case "--node":
       case "--node-version": {
         const value = consumeValue();
         for (const chunk of value.split(",")) {

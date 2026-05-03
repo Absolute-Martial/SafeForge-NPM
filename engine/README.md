@@ -138,7 +138,3 @@ The terminal CLI also uses:
 `/cli/status` reports engine reachability, Docker availability, publish/registry readiness, and LLM configuration presence.
 
 `/registry/precheck` checks for an exact published verdict for a package version when registry reads are configured.
-
-## References
-
-- Vulnhuntr: https://github.com/protectai/vulnhuntr

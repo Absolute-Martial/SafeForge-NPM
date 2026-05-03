@@ -175,13 +175,13 @@ The first screen is the settings page. Configure your provider, models, and vuln
 
 ## Terminal CLI
 
-SafeForge now ships a terminal-native wrapper in `cli/`:
+SafeForge ships a terminal-native wrapper in `cli/`. It talks to the running engine and gives you the same verdict flow from the terminal, where packages usually start causing mischief.
 
 ```bash
 npm --prefix cli install
 npm --prefix cli run build
 node cli/dist/index.js doctor
-node cli/dist/index.js scan event-stream@3.3.6
+node cli/dist/index.js scan lodash
 ```
 
 Once the package is published, the intended entrypoint is:
@@ -191,15 +191,33 @@ safenpm doctor
 safenpm scan event-stream@3.3.6
 ```
 
-Useful flags:
+Common examples:
 
 ```bash
-safenpm scan lodash@4.17.21 --rescan --json --no-publish
-safenpm scan eslint@9.0.0 --node-version 22 --node-version 24 --scan-depth 2 --security-mode balanced
+safenpm scan lodash
+safenpm scan express@4.17.1 --depth 2 --mode balanced
+safenpm scan prettier --mode strict
+safenpm scan lodash@4.17.15 --json
+safenpm scan eslint@9.0.0 --node 22,24 --depth 2
 safenpm scan react@19.0.0 --provider openai --base-url https://api.openai.com/v1 --model gpt-4.1-mini --api-key "$SAFEFORGE_NPM_SCAN_API_KEY"
 ```
 
-The CLI talks to a running SafeForge engine API, defaults to `http://127.0.0.1:8000`, reuses an existing published verdict when registry reads are configured and an exact version audit already exists, and falls back to a fresh scan when `--rescan` is set.
+Useful flags:
+
+```text
+--depth <0-5>                         dependency scan depth
+--mode <strict|balanced|research>     security policy mode
+--node <22,24>                        Node versions for CLI behavior checks
+--json                                machine-readable output
+--no-publish                          skip registry publishing
+--rescan                              force a fresh scan
+```
+
+The canonical forms also work: `--scan-depth`, `--security-mode`, and `--node-version`.
+
+Available commands today are `safenpm scan <package>` and `safenpm doctor`. Future commands such as `scan-lock`, `report`, `config`, and install blocking are intentionally not documented as current features yet. We like ambition; we also like not lying to tired developers.
+
+More CLI examples live in [cli/README.md](cli/README.md).
 
 ## Local Development
 
@@ -242,12 +260,3 @@ The current implementation has been verified with:
 - `node cli/dist/index.js doctor --api-url http://127.0.0.1:8124 --json`
 - `node cli/dist/index.js scan is-number@7.0.0 --api-url http://127.0.0.1:8124 --json --no-publish`
 - targeted engine unit tests for audit option sanitization, CLI command detection, runtime risk mapping, provider override behavior, config loading, and sandbox instrumentation
-
-## Credits
-
-SafeForge NPM builds on prior open-source ideas and reworks them into a provider-agnostic npm security scanner.
-
-- Vulnhuntr by Protect AI  
-  https://github.com/protectai/vulnhuntr
-
-Vulnhuntr informs the staged AI-assisted reasoning workflow and confidence shaping.

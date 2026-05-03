@@ -59,6 +59,46 @@ test("buildScanRequest preserves ephemeral llm override but sanitizeScanRequestF
   assert.equal(request.securityMode, "balanced");
 });
 
+test("parseCliArgs supports friendly scan aliases", () => {
+  const parsed = parseCliArgs([
+    "scan",
+    "express@4.17.1",
+    "--depth",
+    "2",
+    "--mode",
+    "balanced",
+    "--node",
+    "22,24",
+  ]);
+
+  assert.equal(parsed.command, "scan");
+  if (parsed.command !== "scan") throw new Error("expected scan command");
+  assert.deepEqual(parsed.flags.packageSpec, { name: "express", version: "4.17.1" });
+  assert.equal(parsed.flags.scanDepth, 2);
+  assert.equal(parsed.flags.securityMode, "balanced");
+  assert.deepEqual(parsed.flags.nodeVersions, ["22", "24"]);
+});
+
+test("parseCliArgs keeps canonical scan flags working", () => {
+  const parsed = parseCliArgs([
+    "scan",
+    "eslint",
+    "--scan-depth",
+    "5",
+    "--security-mode",
+    "research",
+    "--node-version",
+    "24",
+  ]);
+
+  assert.equal(parsed.command, "scan");
+  if (parsed.command !== "scan") throw new Error("expected scan command");
+  assert.deepEqual(parsed.flags.packageSpec, { name: "eslint" });
+  assert.equal(parsed.flags.scanDepth, 5);
+  assert.equal(parsed.flags.securityMode, "research");
+  assert.deepEqual(parsed.flags.nodeVersions, ["24"]);
+});
+
 test("shouldReuseRegistryVerdict only reuses exact matches when rescan is false", () => {
   assert.equal(
     shouldReuseRegistryVerdict(
